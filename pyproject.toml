@@ -28,6 +28,7 @@ classifiers = [
 [project.optional-dependencies]
 test = [
     "pytest",
+    "pytest-bdd",
 ]
 
 [project.urls]

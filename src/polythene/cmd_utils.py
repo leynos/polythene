@@ -126,8 +126,12 @@ def run_cmd(
     """
 
     timeout = _merge_timeout(timeout, run_kwargs)
+    if isinstance(cmd, (str, bytes, bytearray)):
+        msg = "Command strings must be provided as sequences of arguments"
+        raise TypeError(msg)
     if isinstance(cmd, cabc.Sequence):
-        print(f"$ {shlex.join(cmd)}", file=sys.stderr)
+        argv = [str(part) for part in cmd]
+        print(f"$ {shlex.join(argv)}", file=sys.stderr)
         if run_kwargs:
             msg = (
                 "Sequence commands do not accept keyword arguments: "
@@ -135,9 +139,9 @@ def run_cmd(
             )
             raise TypeError(msg)
         if fg:
-            subprocess.run(list(cmd), check=True, timeout=timeout)  # noqa: S603
+            subprocess.run(argv, check=True, timeout=timeout)  # noqa: S603
             return 0
-        return subprocess.check_call(list(cmd), timeout=timeout)  # noqa: S603
+        return subprocess.check_call(argv, timeout=timeout)  # noqa: S603
 
     args = list(cmd.formulate())
     print(f"$ {shlex.join(args)}", file=sys.stderr)
@@ -176,7 +180,7 @@ def run_cmd(
         result = cmd()
         return result if isinstance(result, int) else 0
 
-    if not fg and timeout is not None and isinstance(cmd, SupportsRun):
+    if timeout is not None and isinstance(cmd, SupportsRun):
         run_kwargs.setdefault("timeout", timeout)
 
     if run_kwargs:

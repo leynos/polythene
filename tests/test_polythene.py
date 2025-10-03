@@ -2,53 +2,13 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass
-from io import StringIO
 from pathlib import Path
 from typing import Callable, Sequence
 
 import pytest
+from conftest import CliResult
 
 import polythene
-
-
-@dataclass(slots=True)
-class CliResult:
-    """Container capturing CLI output and exit status."""
-
-    exit_code: int
-    stdout: str
-    stderr: str
-
-
-@pytest.fixture()
-def run_cli() -> Callable[[Sequence[str]], CliResult]:
-    """Return a helper that invokes the Cyclopts app and captures output."""
-
-    def _invoke(args: Sequence[str]) -> CliResult:
-        stdout_buffer = StringIO()
-        stderr_buffer = StringIO()
-        exit_code = 0
-
-        try:
-            with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-                polythene.app(list(args))
-        except SystemExit as exc:  # pragma: no cover - exercised in assertions
-            code = exc.code
-            if code is None:
-                exit_code = 0
-            elif isinstance(code, int):
-                exit_code = code
-            else:
-                exit_code = int(code)
-        return CliResult(
-            exit_code=exit_code,
-            stdout=stdout_buffer.getvalue(),
-            stderr=stderr_buffer.getvalue(),
-        )
-
-    return _invoke
 
 
 def test_cmd_pull_exports_rootfs(
@@ -92,7 +52,53 @@ def test_cmd_pull_exports_rootfs(
     assert (tmp_path / "uuid-1234" / "tmp").is_dir()
 
 
-def test_cmd_exec_uses_first_available_runner(
+def test_cmd_pull_retries_existing_uuid(
+    run_cli: Callable[[Sequence[str]], CliResult],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The ``pull`` command regenerates a UUID after a collision."""
+    uuids = iter(["uuid-1", "uuid-2"])
+    monkeypatch.setattr(polythene, "generate_uuid", lambda: next(uuids))
+
+    call_count = 0
+
+    def _fake_export(image: str, dest: Path, *, timeout: int | None = None) -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise FileExistsError(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(polythene, "export_rootfs", _fake_export)
+
+    result = run_cli(["pull", "busybox", "--store", tmp_path.as_posix()])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "uuid-2"
+    assert call_count == 2
+
+
+class _DummyBackend:
+    def __init__(self, return_code: int | None, *, requires_root: bool = False) -> None:
+        self.return_code = return_code
+        self.requires_root = requires_root
+        self.calls: list[tuple[Path, str, int | None]] = []
+
+    def run(
+        self,
+        root: Path,
+        inner_cmd: str,
+        *,
+        timeout: int | None,
+        logger: Callable[[str], None],
+        container_tmp: Path,
+    ) -> int | None:
+        self.calls.append((root, inner_cmd, timeout))
+        return self.return_code
+
+
+def test_cmd_exec_uses_first_available_backend(
     run_cli: Callable[[Sequence[str]], CliResult],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -101,17 +107,9 @@ def test_cmd_exec_uses_first_available_runner(
     root = tmp_path / "uuid-5678"
     root.mkdir(parents=True)
 
-    calls: list[tuple[Path, str, int | None]] = []
-
-    def _fake_bwrap(path: Path, inner_cmd: str, timeout: int | None = None) -> int:
-        calls.append((path, inner_cmd, timeout))
-        return 0
-
-    def _fail_proot(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("proot should not be invoked when bubblewrap succeeds")
-
-    monkeypatch.setattr(polythene, "run_with_bwrap", _fake_bwrap)
-    monkeypatch.setattr(polythene, "run_with_proot", _fail_proot)
+    primary = _DummyBackend(0)
+    fallback = _DummyBackend(None)
+    monkeypatch.setattr(polythene, "BACKENDS", (primary, fallback))
     monkeypatch.setattr(polythene, "IS_ROOT", False)
 
     result = run_cli(
@@ -129,7 +127,8 @@ def test_cmd_exec_uses_first_available_runner(
     )
 
     assert result.exit_code == 0
-    assert calls == [(root, "echo 'hello world'", 15)]
+    assert primary.calls == [(root, "echo 'hello world'", 15)]
+    assert fallback.calls == []
 
 
 def test_cmd_exec_reports_missing_root(
@@ -150,3 +149,54 @@ def test_cmd_exec_reports_missing_root(
 
     assert result.exit_code == 1
     assert "No such UUID rootfs" in result.stderr
+
+
+def test_cmd_exec_propagates_backend_error(
+    run_cli: Callable[[Sequence[str]], CliResult],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A non-zero backend exit code terminates the CLI with that status."""
+    root = tmp_path / "uuid-9999"
+    root.mkdir()
+
+    unavailable = _DummyBackend(None)
+    failing = _DummyBackend(42)
+    monkeypatch.setattr(polythene, "BACKENDS", (unavailable, failing))
+    monkeypatch.setattr(polythene, "IS_ROOT", True)
+
+    result = run_cli(
+        [
+            "exec",
+            "uuid-9999",
+            "--store",
+            tmp_path.as_posix(),
+            "--",
+            "false",
+        ]
+    )
+
+    assert result.exit_code == 42
+    assert unavailable.calls and failing.calls
+
+
+def test_cmd_exec_requires_command(
+    run_cli: Callable[[Sequence[str]], CliResult],
+    tmp_path: Path,
+) -> None:
+    """``exec`` exits with an error when invoked without a command."""
+    rootfs = tmp_path / "uuid-empty"
+    rootfs.mkdir()
+
+    result = run_cli(
+        [
+            "exec",
+            "uuid-empty",
+            "--store",
+            tmp_path.as_posix(),
+            "--",
+        ]
+    )
+
+    assert result.exit_code == 1
+    assert "requires an argument" in result.stdout
