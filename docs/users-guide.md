@@ -5,6 +5,13 @@ project wraps a pair of command line tools that automate the workflow of
 exporting Podman images into disposable root filesystems and running commands
 inside those filesystems without a dedicated container runtime.
 
+Polythene exists to bridge very different execution environments. In OpenAI's
+Codex sandbox you run as root without access to container engines, while GitHub
+runners expose Podman to an unprivileged user. Polythene exposes the same
+commands in both scenarios so package installation tests, filesystem mutation
+checks, and other system-level automation run identically across local
+development and continuous integration (CI).
+
 ## Installation workflow
 
 Polythene uses [uv](https://github.com/astral-sh/uv) to manage Python
@@ -30,6 +37,22 @@ via `ty`.
 Polythene exposes two Typer commands. Both commands accept the optional
 `--store` argument to override the root filesystem directory (defaults to
 `/var/tmp/polythene`).
+
+### Execution environments
+
+Before running commands, decide how they interact with your host. Polythene
+provides a single interface but adapts to the available tooling:
+
+- **Codex sandbox** – You run as root without container engines. `polythene
+  pull` still uses Podman inside the sandbox because Codex maintains the binary
+  on disk, and `polythene exec` falls back to `bwrap`, `proot`, or a privileged
+  `chroot`.
+- **GitHub runners** – You run as an unprivileged user with Podman available.
+  The CLI exports images in the same way but typically selects `bwrap` for
+  execution, providing equivalent isolation to the Codex workflow.
+
+In both environments the exported root filesystem is disposable, enabling
+repeatable system-level tests without polluting the host.
 
 ### `polythene pull`
 
@@ -65,6 +88,17 @@ order:
 Each backend receives the prepared filesystem as its root and blocks network
 access. If none of the backends is available, the command fails with an error
 message detailing the missing tooling.
+
+Because the same UUID works across hosts, you can prepare an image on Codex and
+reuse it on CI:
+
+```shell
+uv run polythene pull registry.example.invalid/tools:latest
+uv run polythene exec <uuid> -- make -C /workspace/tests system
+```
+
+The `exec` invocation will select the available backend on each host while the
+commands run unchanged.
 
 ## Environment variables
 

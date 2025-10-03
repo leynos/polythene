@@ -6,6 +6,21 @@ its plumbum process helpers, and uuid6 UUID generation so you can pull
 container images and execute commands inside ephemeral root filesystems without
 requiring a full container runtime on the target machine.
 
+## Motivation
+
+System-level tests—package installation, filesystem mutations, and other tasks
+that normally demand containers—are difficult to run in sandboxes that disable
+container engines. Polythene provides a consistent abstraction over those
+workflows so the same test suite can run inside OpenAI's Codex cloud
+environment (root user, no containers) and on GitHub runners (unprivileged
+user, containers available). The CLI pulls the desired base image, exports it
+to a disposable root filesystem, and then selects the safest available
+execution backend for the host.
+
+The result is portable automation: you can iterate on package verification in
+a Codex workspace and ship the same tests to CI without changing commands or
+rewriting scripts.
+
 ## Dependencies
 
 Polythene targets Python 3.9 and newer. Runtime dependencies are bundled in the
@@ -59,6 +74,18 @@ uv run polythene exec 018f6a4c-2f25-7642-bb1d-d523b6b0e05d -- uname -a
 The execution command runs the provided program inside the root filesystem. It
 tries `bwrap` first, then `proot`, and finally `chroot`. You can override the
 store location per command with `--store`.
+
+For example, you can install and test a package using the same commands in
+Codex and CI:
+
+```shell
+uv run polythene exec <uuid> -- dnf install -y ripgrep
+uv run polythene exec <uuid> -- rg --version
+```
+
+When a container runtime is unavailable, Polythene falls back to sandboxing via
+`bwrap` or `proot`. On hosts with a container engine, the same commands reuse
+the exported filesystem to provide identical isolation boundaries.
 
 ## Development workflow
 
