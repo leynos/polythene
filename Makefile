@@ -67,8 +67,7 @@ typecheck: build ty ## Run typechecking
 	ty check
 
 markdownlint: $(MDLINT) ## Lint Markdown files
-	find . -type f -name '*.md' \
-	  -not -path './.venv/*' -print0 | xargs -0 $(MDLINT)
+	markdownlint-cli2 "**/*.md"
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	nixie --no-sandbox
