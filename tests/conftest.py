@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
+import sys
+import typing as typ
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass
 from io import StringIO
 from runpy import run_module
-import sys
-from typing import Callable, Sequence
 
 import pytest
 
 import polythene
 
 
-@dataclass(slots=True)
+@dc.dataclass(slots=True)
 class CliResult:
     """Container capturing CLI output and exit status."""
 
@@ -23,11 +23,11 @@ class CliResult:
     stderr: str
 
 
-@pytest.fixture()
-def run_cli() -> Callable[[Sequence[str]], CliResult]:
+@pytest.fixture
+def run_cli() -> typ.Callable[[typ.Sequence[str]], CliResult]:
     """Return a helper that invokes the Cyclopts app and captures output."""
 
-    def _invoke(args: Sequence[str]) -> CliResult:
+    def _invoke(args: typ.Sequence[str]) -> CliResult:
         stdout_buffer = StringIO()
         stderr_buffer = StringIO()
         exit_code = 0
@@ -52,11 +52,11 @@ def run_cli() -> Callable[[Sequence[str]], CliResult]:
     return _invoke
 
 
-@pytest.fixture()
-def run_module_cli() -> Callable[[Sequence[str]], CliResult]:
+@pytest.fixture
+def run_module_cli() -> typ.Callable[[typ.Sequence[str]], CliResult]:
     """Return a helper that invokes ``python -m polythene``."""
 
-    def _invoke(args: Sequence[str]) -> CliResult:
+    def _invoke(args: typ.Sequence[str]) -> CliResult:
         stdout_buffer = StringIO()
         stderr_buffer = StringIO()
         exit_code = 0

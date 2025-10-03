@@ -9,6 +9,7 @@ Examples
 >>> from plumbum import local
 >>> run_cmd(["echo", "hello"])
 >>> run_cmd(local["echo"]["hello"])
+
 """
 
 from __future__ import annotations
@@ -70,27 +71,13 @@ class SupportsAnd(typ.Protocol):
         ...
 
 
-Command = typ.Union[cabc.Sequence[str], SupportsFormulate]
+Command = cabc.Sequence[str] | SupportsFormulate
 
 KwargDict = dict[str, object]
 
 
 def _merge_timeout(timeout: float | None, run_kwargs: KwargDict) -> float | None:
-    """Return a merged timeout value.
-
-    Parameters
-    ----------
-    timeout : float or None
-        Timeout supplied via the dedicated parameter.
-    run_kwargs : dict of str to Any
-        Keyword arguments passed to ``run_cmd``.
-
-    Returns
-    -------
-    float or None
-        The timeout to enforce, favouring ``run_kwargs`` when provided.
-    """
-
+    """Return the timeout to enforce, preferring ``run_kwargs`` when present."""
     if "timeout" in run_kwargs:
         if timeout is not None:
             raise TimeoutConflictError
@@ -106,27 +93,9 @@ def run_cmd(
     timeout: float | None = None,
     **run_kwargs: object,
 ) -> object:
-    """Execute ``cmd`` while echoing it to stderr.
-
-    Parameters
-    ----------
-    cmd : Sequence of str or SupportsFormulate
-        Shell command to execute.
-    fg : bool, optional
-        When ``True``, stream subprocess output to the console.
-    timeout : float or None, optional
-        Kill the process after this many seconds when supported.
-    **run_kwargs : Any
-        Adapter-specific keyword arguments passed through to ``run``/``run_fg``.
-
-    Returns
-    -------
-    Any
-        Result returned by the underlying command adapter.
-    """
-
+    """Execute ``cmd`` while echoing it to stderr."""
     timeout = _merge_timeout(timeout, run_kwargs)
-    if isinstance(cmd, (str, bytes, bytearray)):
+    if isinstance(cmd, str | bytes | bytearray):
         msg = "Command strings must be provided as sequences of arguments"
         raise TypeError(msg)
     if isinstance(cmd, cabc.Sequence):

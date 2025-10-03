@@ -7,26 +7,25 @@
 #   "uuid6>=2025.0.1",
 # ]
 # ///
-"""
-polythene — Temu podman for Codex.
+"""Polythene — Temu podman for Codex.
 
 Two subcommands:
 
-  polythene pull IMAGE
-      Pull/export IMAGE into a per-UUID rootfs; prints the UUID to stdout.
+polythene pull IMAGE
+    Pull/export IMAGE into a per-UUID rootfs; prints the UUID to stdout.
 
-  polythene exec UUID -- CMD [ARG...]
-      Execute a command in the rootfs identified by UUID, trying
-      bubblewrap -> proot -> chroot. No networking, no cgroups,
-      no container runtime needed at exec-time.
+polythene exec UUID -- CMD [ARG...]
+    Execute a command in the rootfs identified by UUID, trying
+    bubblewrap -> proot -> chroot. No networking, no cgroups,
+    no container runtime needed at exec-time.
 
 Environment:
-  POLYTHENE_STORE   Root directory for UUID rootfs (default: /var/tmp/polythene)
-  POLYTHENE_VERBOSE If set (to any value), prints progress logs to stderr.
+    POLYTHENE_STORE   Root directory for UUID rootfs (default: /var/tmp/polythene)
+    POLYTHENE_VERBOSE If set (to any value), prints progress logs to stderr.
 
 Podman environment hardening (set automatically if unset):
-  CONTAINERS_STORAGE_DRIVER=vfs
-  CONTAINERS_EVENTS_BACKEND=file
+    CONTAINERS_STORAGE_DRIVER=vfs
+    CONTAINERS_EVENTS_BACKEND=file
 """
 
 from __future__ import annotations
@@ -39,7 +38,6 @@ import tempfile
 import time
 import typing as typ
 from pathlib import Path
-from typing import Annotated, Sequence
 
 import cyclopts
 from cyclopts import App, Parameter
@@ -81,16 +79,16 @@ __all__ = [
     "store_path_for",
 ]
 
-ImageArgument = Annotated[
+ImageArgument = typ.Annotated[
     str,
     Parameter(
         help="Image reference, e.g. docker.io/library/busybox:latest",
     ),
 ]
-UuidArgument = Annotated[
+UuidArgument = typ.Annotated[
     str, Parameter(help="UUID of the exported filesystem (from `polythene pull`)")
 ]
-StoreOption = Annotated[
+StoreOption = typ.Annotated[
     Path,
     Parameter(
         alias=["-s", "--store"],
@@ -98,11 +96,11 @@ StoreOption = Annotated[
         help="Directory to store UUID rootfs trees",
     ),
 ]
-TimeoutOption = Annotated[
+TimeoutOption = typ.Annotated[
     int | None,
     Parameter(alias=["-t", "--timeout"], help="Timeout in seconds to allow"),
 ]
-CommandArgument = Annotated[
+CommandArgument = typ.Annotated[
     list[str],
     Parameter(
         consume_multiple=True,
@@ -113,13 +111,11 @@ CommandArgument = Annotated[
 
 def _error(message: str) -> None:
     """Print ``message`` to stderr without additional formatting."""
-
     print(message, file=sys.stderr)
 
 
 def _normalise_retcode(retcode: int | None) -> int:
     """Return a sensible exit status when a command lacks a numeric code."""
-
     if not retcode:
         return 1
     return int(retcode)
@@ -206,10 +202,7 @@ def cmd_pull(
     store: StoreOption = DEFAULT_STORE,
     timeout: TimeoutOption = None,
 ) -> None:
-    """
-    Pull IMAGE and export its filesystem into a new UUIDv7 directory under STORE.
-    Prints the UUID on stdout.
-    """
+    """Pull IMAGE, export it into STORE/UUID, and print the UUID."""
     ensure_directory(store)
     uid = generate_uuid()
     root = store_path_for(uid, store)
@@ -235,11 +228,7 @@ def cmd_exec(
     store: StoreOption = DEFAULT_STORE,
     timeout: TimeoutOption = None,
 ) -> None:
-    """Run ``CMD`` inside the UUID's rootfs with bwrap → proot → chroot fallback.
-
-    The command's exit status is propagated.
-    An optional timeout can abort long runs.
-    """
+    """Run ``CMD`` inside the UUID's rootfs with bwrap → proot → chroot fallback."""
     if not cmd:
         _error("No command provided")
         raise SystemExit(2)
@@ -273,9 +262,8 @@ def cmd_exec(
     raise SystemExit(126)
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(argv: typ.Sequence[str] | None = None) -> None:
     """Invoke the Cyclopts CLI entry point."""
-
     if argv is None:
         argv = sys.argv[1:]
     app(list(argv))

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import typing as typ
-from dataclasses import dataclass
 from pathlib import Path
 
 from plumbum.commands.base import BaseCommand
@@ -26,7 +26,7 @@ PrepareFn = typ.Callable[
 ]
 
 
-@dataclass(slots=True, frozen=True)
+@dc.dataclass(slots=True, frozen=True)
 class Backend:
     """Descriptor for an execution backend."""
 
@@ -46,7 +46,6 @@ class Backend:
         container_tmp: Path,
     ) -> int | None:
         """Probe and run the backend, returning the exit status."""
-
         try:
             tool = get_command(self.binary)
         except SystemExit:
@@ -66,7 +65,6 @@ class Backend:
 
 def ensure_runtime_paths(root: Path) -> None:
     """Ensure directories required by execution backends exist."""
-
     for sub in ("dev", "tmp"):
         ensure_directory(root / sub)
 
@@ -215,7 +213,6 @@ def _prepare_chroot(
 
 def create_backends() -> tuple[Backend, ...]:
     """Return the supported execution backends in priority order."""
-
     return (
         Backend(
             name="bubblewrap",

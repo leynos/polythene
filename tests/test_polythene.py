@@ -2,25 +2,25 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Callable, Sequence
-
 import importlib
-
-import pytest
-from conftest import CliResult
+import typing as typ
 
 import polythene
 
+if typ.TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
+    from conftest import CliResult
+
 
 def test_cmd_pull_exports_rootfs(
-    run_cli: Callable[[Sequence[str]], CliResult],
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """The ``pull`` command exports the rootfs and prints the generated UUID."""
     calls: list[tuple[str, Path, int | None]] = []
-
     monkeypatch.setattr(polythene, "generate_uuid", lambda: "uuid-1234")
 
     def _fake_export(image: str, dest: Path, *, timeout: int | None = None) -> None:
@@ -55,7 +55,7 @@ def test_cmd_pull_exports_rootfs(
 
 
 def test_cmd_pull_retries_existing_uuid(
-    run_cli: Callable[[Sequence[str]], CliResult],
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -93,7 +93,7 @@ class _DummyBackend:
         inner_cmd: str,
         *,
         timeout: int | None,
-        logger: Callable[[str], None],
+        logger: typ.Callable[[str], None],
         container_tmp: Path,
     ) -> int | None:
         self.calls.append((root, inner_cmd, timeout))
@@ -101,7 +101,7 @@ class _DummyBackend:
 
 
 def test_cmd_exec_uses_first_available_backend(
-    run_cli: Callable[[Sequence[str]], CliResult],
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -134,7 +134,7 @@ def test_cmd_exec_uses_first_available_backend(
 
 
 def test_cmd_exec_reports_missing_root(
-    run_cli: Callable[[Sequence[str]], CliResult],
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     tmp_path: Path,
 ) -> None:
     """``exec`` exits with an error when the requested rootfs is missing."""
@@ -154,7 +154,7 @@ def test_cmd_exec_reports_missing_root(
 
 
 def test_cmd_exec_propagates_backend_error(
-    run_cli: Callable[[Sequence[str]], CliResult],
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -179,17 +179,17 @@ def test_cmd_exec_propagates_backend_error(
     )
 
     assert result.exit_code == 42
-    assert unavailable.calls and failing.calls
+    assert unavailable.calls
+    assert failing.calls
 
 
 def test_cmd_exec_requires_command(
-    run_cli: Callable[[Sequence[str]], CliResult],
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     tmp_path: Path,
 ) -> None:
     """``exec`` exits with an error when invoked without a command."""
     rootfs = tmp_path / "uuid-empty"
     rootfs.mkdir()
-
     result = run_cli(
         [
             "exec",
@@ -208,7 +208,6 @@ def test_module_main_delegates_to_package_main(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``python -m polythene`` calls the package ``main`` function."""
-
     called = False
 
     def _stub() -> None:
@@ -225,10 +224,9 @@ def test_module_main_delegates_to_package_main(
 
 def test_main_accepts_custom_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     """The package ``main`` helper forwards explicit argv tokens to Cyclopts."""
-
     received: list[str] = []
 
-    def _capture(tokens: Sequence[str]) -> None:
+    def _capture(tokens: typ.Sequence[str]) -> None:
         received[:] = list(tokens)
 
     monkeypatch.setattr(polythene, "app", _capture)

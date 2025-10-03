@@ -5,7 +5,6 @@ from __future__ import annotations
 
 def main() -> None:
     """Invoke the package CLI entry point."""
-
     from . import main as package_main
 
     package_main()
