@@ -10,7 +10,7 @@ import pytest
 from conftest import CliResult
 from pytest_bdd import given, parsers, scenarios, then, when
 
-import polythene
+import polythene.isolation as isolation
 
 Context = dict[str, object]
 
@@ -33,7 +33,7 @@ def clean_store(tmp_path: Path, cli_context: Context) -> Path:
 @given(parsers.parse('UUID generation returns "{value}"'))
 def stub_uuid(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     """Force the CLI to generate a predictable UUID."""
-    monkeypatch.setattr(polythene, "generate_uuid", lambda: value)
+    monkeypatch.setattr(isolation, "generate_uuid", lambda: value)
 
 
 @given("image export succeeds")
@@ -43,7 +43,7 @@ def stub_export(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake(image: str, dest: Path, *, timeout: int | None = None) -> None:
         dest.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(polythene, "export_rootfs", _fake)
+    monkeypatch.setattr(isolation, "export_rootfs", _fake)
 
 
 @when(parsers.parse('I run the CLI with arguments "{raw}"'))

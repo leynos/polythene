@@ -6,6 +6,7 @@ import importlib
 import typing as typ
 
 import polythene
+import polythene.isolation as isolation
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -21,13 +22,13 @@ def test_cmd_pull_exports_rootfs(
 ) -> None:
     """The ``pull`` command exports the rootfs and prints the generated UUID."""
     calls: list[tuple[str, Path, int | None]] = []
-    monkeypatch.setattr(polythene, "generate_uuid", lambda: "uuid-1234")
+    monkeypatch.setattr(isolation, "generate_uuid", lambda: "uuid-1234")
 
     def _fake_export(image: str, dest: Path, *, timeout: int | None = None) -> None:
         calls.append((image, dest, timeout))
         dest.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(polythene, "export_rootfs", _fake_export)
+    monkeypatch.setattr(isolation, "export_rootfs", _fake_export)
 
     result = run_cli(
         [
@@ -61,7 +62,7 @@ def test_cmd_pull_retries_existing_uuid(
 ) -> None:
     """The ``pull`` command regenerates a UUID after a collision."""
     uuids = iter(["uuid-1", "uuid-2"])
-    monkeypatch.setattr(polythene, "generate_uuid", lambda: next(uuids))
+    monkeypatch.setattr(isolation, "generate_uuid", lambda: next(uuids))
 
     call_count = 0
 
@@ -72,7 +73,7 @@ def test_cmd_pull_retries_existing_uuid(
             raise FileExistsError(dest)
         dest.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(polythene, "export_rootfs", _fake_export)
+    monkeypatch.setattr(isolation, "export_rootfs", _fake_export)
 
     result = run_cli(["pull", "busybox", "--store", tmp_path.as_posix()])
 
@@ -111,8 +112,8 @@ def test_cmd_exec_uses_first_available_backend(
 
     primary = _DummyBackend(0)
     fallback = _DummyBackend(None)
-    monkeypatch.setattr(polythene, "BACKENDS", (primary, fallback))
-    monkeypatch.setattr(polythene, "IS_ROOT", False)
+    monkeypatch.setattr(isolation, "BACKENDS", (primary, fallback))
+    monkeypatch.setattr(isolation, "IS_ROOT", False)
 
     result = run_cli(
         [
@@ -164,8 +165,8 @@ def test_cmd_exec_propagates_backend_error(
 
     unavailable = _DummyBackend(None)
     failing = _DummyBackend(42)
-    monkeypatch.setattr(polythene, "BACKENDS", (unavailable, failing))
-    monkeypatch.setattr(polythene, "IS_ROOT", True)
+    monkeypatch.setattr(isolation, "BACKENDS", (unavailable, failing))
+    monkeypatch.setattr(isolation, "IS_ROOT", True)
 
     result = run_cli(
         [
@@ -229,6 +230,7 @@ def test_main_accepts_custom_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     def _capture(tokens: typ.Sequence[str]) -> None:
         received[:] = list(tokens)
 
+    monkeypatch.setattr(isolation, "app", _capture)
     monkeypatch.setattr(polythene, "app", _capture)
 
     polythene.main(["pull", "busybox"])
