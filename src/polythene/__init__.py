@@ -39,7 +39,7 @@ import tempfile
 import time
 import typing as typ
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Sequence
 
 import cyclopts
 from cyclopts import App, Parameter
@@ -273,9 +273,12 @@ def cmd_exec(
     raise SystemExit(126)
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Invoke the Cyclopts CLI entry point."""
-    app()
+
+    if argv is None:
+        argv = sys.argv[1:]
+    app(list(argv))
 
 
 if __name__ == "__main__":

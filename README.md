@@ -57,10 +57,14 @@ make all
 ## Usage
 
 Polythene exposes a Cyclopts CLI entry point named `polythene`. Run it with
-`uv run` during development:
+`uv run` during development, or call the installed script directly after
+`pip`/`uv` installation. The module shim also supports `python -m polythene`
+for environments that prefer explicit interpreter invocation:
 
 ```shell
 uv run polythene pull docker.io/library/busybox:latest
+# or
+python -m polythene pull docker.io/library/busybox:latest
 ```
 
 The `pull` command downloads the image, exports it to a UUID-named directory in

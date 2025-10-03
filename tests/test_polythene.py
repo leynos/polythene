@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Sequence
 
+import importlib
+
 import pytest
 from conftest import CliResult
 
@@ -200,3 +202,37 @@ def test_cmd_exec_requires_command(
 
     assert result.exit_code == 1
     assert "requires an argument" in result.stdout
+
+
+def test_module_main_delegates_to_package_main(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``python -m polythene`` calls the package ``main`` function."""
+
+    called = False
+
+    def _stub() -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(polythene, "main", _stub)
+    module_main = importlib.import_module("polythene.__main__").main
+
+    module_main()
+
+    assert called
+
+
+def test_main_accepts_custom_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The package ``main`` helper forwards explicit argv tokens to Cyclopts."""
+
+    received: list[str] = []
+
+    def _capture(tokens: Sequence[str]) -> None:
+        received[:] = list(tokens)
+
+    monkeypatch.setattr(polythene, "app", _capture)
+
+    polythene.main(["pull", "busybox"])
+
+    assert received == ["pull", "busybox"]

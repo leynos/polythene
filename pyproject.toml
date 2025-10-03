@@ -31,6 +31,9 @@ test = [
     "pytest-bdd",
 ]
 
+[project.scripts]
+polythene = "polythene.__main__:main"
+
 [project.urls]
 homepage = "https://github.com/leynos/polythene"
 repository = "https://github.com/leynos/polythene"

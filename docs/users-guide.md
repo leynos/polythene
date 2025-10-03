@@ -58,6 +58,8 @@ repeatable system-level tests without polluting the host.
 
 ```shell
 uv run polythene pull docker.io/library/busybox:latest
+# or
+python -m polythene pull docker.io/library/busybox:latest
 ```
 
 The pull command:
@@ -74,6 +76,8 @@ variable is set, the command also prints progress messages to stderr.
 
 ```shell
 uv run polythene exec <uuid> -- uname -a
+# or
+python -m polythene exec <uuid> -- uname -a
 ```
 
 Replace `<uuid>` with the value returned by a previous `polythene pull` call.

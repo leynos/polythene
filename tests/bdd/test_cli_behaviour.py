@@ -51,6 +51,18 @@ def run_cli_command(
     cli_context["result"] = run_cli(args)
 
 
+@when(parsers.parse('I run the module CLI with arguments "{raw}"'))
+def run_module_cli_command(
+    raw: str,
+    run_module_cli: Callable[[Sequence[str]], CliResult],
+    cli_context: dict[str, object],
+) -> None:
+    store = Path(cli_context["store"])
+    formatted = raw.format(store=store.as_posix())
+    args = shlex.split(formatted)
+    cli_context["result"] = run_module_cli(args)
+
+
 @then(parsers.parse("the CLI exits with code {code:d}"))
 def assert_exit(cli_context: dict[str, object], code: int) -> None:
     result = cli_context["result"]
