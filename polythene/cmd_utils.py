@@ -1,24 +1,22 @@
 """Utilities for echoing and running external commands.
 
-Provides a single entrypoint, ``run_cmd``, that uniformly echoes and
-executes either raw argv sequences or adapter objects exposing
-``formulate()``.
+Provides a single entrypoint, :func:`run_cmd`, that uniformly echoes and
+executes plumbum command invocations or pipelines.
 
 Examples
 --------
 >>> from plumbum import local
->>> run_cmd(["echo", "hello"])
 >>> run_cmd(local["echo"]["hello"])
 
 """
 
 from __future__ import annotations
 
-import collections.abc as cabc
-import shlex
-import subprocess
 import sys
 import typing as typ
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 __all__ = [
     "run_cmd",
@@ -71,7 +69,7 @@ class SupportsAnd(typ.Protocol):
         ...
 
 
-Command = cabc.Sequence[str] | SupportsFormulate
+Command = SupportsFormulate
 
 KwargDict = dict[str, object]
 
@@ -95,46 +93,29 @@ def run_cmd(
 ) -> object:
     """Execute ``cmd`` while echoing it to stderr."""
     timeout = _merge_timeout(timeout, run_kwargs)
-    if isinstance(cmd, str | bytes | bytearray):
-        msg = "Command strings must be provided as sequences of arguments"
+    if not isinstance(cmd, SupportsFormulate):
+        msg = "Command must be a plumbum invocation or pipeline"
         raise TypeError(msg)
-    if isinstance(cmd, cabc.Sequence):
-        argv = [str(part) for part in cmd]
-        print(f"$ {shlex.join(argv)}", file=sys.stderr)
-        if run_kwargs:
-            msg = (
-                "Sequence commands do not accept keyword arguments: "
-                f"{sorted(run_kwargs.keys())}"
-            )
-            raise TypeError(msg)
-        if fg:
-            subprocess.run(argv, check=True, timeout=timeout)  # noqa: S603
-            return 0
-        return subprocess.check_call(argv, timeout=timeout)  # noqa: S603
 
-    args = list(cmd.formulate())
-    print(f"$ {shlex.join(args)}", file=sys.stderr)
+    print(f"$ {cmd}", file=sys.stderr)
     if fg:
         if timeout is not None:
-            if isinstance(cmd, SupportsRun):
-                run_kwargs.setdefault("stdout", None)
-                run_kwargs.setdefault("stderr", None)
-                from plumbum.commands.processes import (  # pyright: ignore[reportMissingTypeStubs]
-                    ProcessTimedOut,
-                )
+            if not isinstance(cmd, SupportsRun):
+                msg = "Command does not support timeout execution"
+                raise TypeError(msg)
+            run_kwargs.setdefault("stdout", None)
+            run_kwargs.setdefault("stderr", None)
+            from plumbum.commands.processes import (  # pyright: ignore[reportMissingTypeStubs]
+                ProcessTimedOut,
+            )
 
-                try:
-                    cmd.run(timeout=timeout, **run_kwargs)
-                except ProcessTimedOut as exc:
-                    raise subprocess.TimeoutExpired(args, timeout) from exc
-                return 0
-            subprocess.run(args, check=True, timeout=timeout)  # noqa: S603
+            try:
+                cmd.run(timeout=timeout, **run_kwargs)
+            except ProcessTimedOut as exc:
+                raise TimeoutError from exc
             return 0
         if isinstance(cmd, SupportsRunFg):
-            if run_kwargs:
-                cmd.run_fg(**run_kwargs)
-            else:
-                cmd.run_fg()
+            cmd.run_fg(**run_kwargs)
             return 0
         if isinstance(cmd, SupportsAnd) and not run_kwargs:
             from plumbum import FG  # pyright: ignore[reportMissingTypeStubs]
@@ -149,8 +130,12 @@ def run_cmd(
         result = cmd()
         return result if isinstance(result, int) else 0
 
-    if timeout is not None and isinstance(cmd, SupportsRun):
-        run_kwargs.setdefault("timeout", timeout)
+    if timeout is not None:
+        if isinstance(cmd, SupportsRun):
+            run_kwargs.setdefault("timeout", timeout)
+        else:
+            msg = "Command does not support timeout execution"
+            raise TypeError(msg)
 
     if run_kwargs:
         if isinstance(cmd, SupportsRun):

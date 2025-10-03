@@ -22,16 +22,21 @@ def context() -> Context:
     return {}
 
 
-@when(parsers.parse('I execute run_cmd with sequence "{command}" in foreground'))
-def run_sequence(
+@when(parsers.parse('I execute run_cmd with command "{command}" in foreground'))
+def run_command(
     command: str,
     capsys: pytest.CaptureFixture[str],
     context: Context,
 ) -> None:
-    """Execute a shell command provided as a sequence."""
-    args = shlex.split(command)
+    """Execute a shell command by constructing a plumbum invocation."""
+    parts = shlex.split(command)
+    if not parts:
+        msg = "Command must contain at least one token"
+        raise ValueError(msg)
+    base = local[parts[0]]
+    cmd = base if len(parts) == 1 else base[tuple(parts[1:])]
     capsys.readouterr()
-    result = run_cmd(args, fg=True)
+    result = run_cmd(cmd, fg=True)
     captured = capsys.readouterr()
     context["result"] = result
     context["captured"] = captured

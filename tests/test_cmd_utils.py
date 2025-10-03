@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+import typing as typ
+
 import pytest
 from plumbum import local
 
 from polythene.cmd_utils import TimeoutConflictError, _merge_timeout, run_cmd
 
 
-def test_run_cmd_sequence_logs_and_succeeds(capsys: pytest.CaptureFixture[str]) -> None:
-    """A simple sequence runs in the foreground and logs the command."""
+def test_run_cmd_command_logs_and_succeeds(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A plumbum command runs in the foreground and logs the invocation."""
+    cmd = local["echo"]["hi"]
     capsys.readouterr()
-    result = run_cmd(["echo", "hi"], fg=True)
+    result = run_cmd(cmd, fg=True)
     captured = capsys.readouterr()
     assert result == 0
-    assert "$ echo hi" in captured.err
+    assert "echo" in captured.err
 
 
 def test_run_cmd_adapter_handles_output(capsys: pytest.CaptureFixture[str]) -> None:
@@ -29,8 +34,8 @@ def test_run_cmd_adapter_handles_output(capsys: pytest.CaptureFixture[str]) -> N
 
 def test_run_cmd_rejects_string_commands() -> None:
     """Passing a bare string raises an informative :class:`TypeError`."""
-    with pytest.raises(TypeError, match="Command strings must be provided"):
-        run_cmd("echo oops")
+    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+        run_cmd(typ.cast(typ.Any, "echo oops"))
 
 
 def test_run_cmd_timeout_conflict() -> None:
@@ -49,6 +54,9 @@ def test_run_cmd_timeout_passthrough() -> None:
 
         def run(self, **kwargs: object) -> object:
             calls.update(kwargs)
+            return 0
+
+        def __call__(self, *args: object, **kwargs: object) -> object:
             return 0
 
     stub = _Stub()

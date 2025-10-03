@@ -125,6 +125,10 @@ datetime = "dt"
 "msgspec.json" = "msjson"
 typing = "typ"
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"subprocess.run".msg = "Use `plumbum` instead of `subprocess.run`"
+"subprocess.check_call".msg = "Use `plumbum` instead of `subprocess.check_call`"
+
 [tool.pytest.ini_options]
 # Ensure asyncio fixtures create a new event loop for each test
 asyncio_default_fixture_loop_scope = "function"
