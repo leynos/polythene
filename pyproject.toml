@@ -48,7 +48,8 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["polythene*"]
 
 [tool.setuptools.package-data]
 "polythene" = []
@@ -56,8 +57,7 @@ where = ["src"]
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-include = ["src", "tests"]
-extraPaths = ["src"]
+include = ["polythene", "tests"]
 
 [tool.ruff]
 line-length = 88

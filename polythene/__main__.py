@@ -1,12 +1,14 @@
-"""Compatibility loader for :mod:`polythene.__main__` from the ``src`` tree."""
+"""Module entry point for ``python -m polythene``."""
 
 from __future__ import annotations
 
-import typing as typ
 
-from ._src_loader import load
+def main() -> None:
+    """Invoke the package CLI entry point."""
+    from . import main as package_main
 
-_MODULE = load(__name__)
+    package_main()
 
-if typ.TYPE_CHECKING:  # pragma: no cover - only evaluated statically
-    from src.polythene.__main__ import main as main
+
+if __name__ == "__main__":  # pragma: no cover - convenience execution
+    main()
