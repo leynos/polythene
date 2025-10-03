@@ -1,14 +1,27 @@
 {
   "config": {
-    "MD004": { "style": "dash" },
-    "MD010": { "code_blocks": false },
+    "MD004": {
+      "style": "dash"
+    },
+    "MD010": {
+      "code_blocks": false
+    },
     "MD013": {
       "line_length": 80,
       "code_block_line_length": 120,
       "tables": false,
       "headings": false
     },
-    "MD029": { "style": "ordered" }
+    "MD029": {
+      "style": "ordered"
+    }
   },
-  "ignores": ["**/.git/**", "**/.venv/**", ".node_modules/**", "**/node_modules/**", "**/target/**"]
+  "ignores": [
+    "**/.git/**",
+    "**/.venv/**",
+    ".node_modules/**",
+    "**/node_modules/**",
+    "**/target/**",
+    "**/.pytest_cache/**"
+  ]
 }

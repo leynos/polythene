@@ -144,5 +144,5 @@ Adjust the predicate to match your retention policy.
 
 ## Further reading
 
-Refer to `polythene/__init__.py` for the Cyclopts application definition
-and to `tests/test_polythene.py` for integration-style usage examples.
+Refer to `polythene/__init__.py` for the Cyclopts application definition and to
+`tests/test_polythene.py` for integration-style usage examples.

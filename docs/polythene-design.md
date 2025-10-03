@@ -7,8 +7,8 @@ inside environments with differing levels of privilege and isolation. The
 Cyclopts-based CLI coordinates root file system staging, command execution, and
 log reporting so that the same test suite can be executed in restrictive
 sandboxes such as the Codex cloud and in container-friendly continuous
-integration (CI) runners. This document records the architectural structure that
-enables that behaviour and captures the trade-offs behind the current
+integration (CI) runners. This document records the architectural structure
+that enables that behaviour and captures the trade-offs behind the current
 implementation.
 
 ## Execution flow
