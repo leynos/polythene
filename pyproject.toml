@@ -1,24 +1,63 @@
 [project]
 name = "polythene"
 version = "0.1.0"
-description = "polythene package"
+description = "A tool for creating and managing containerised environments."
 readme = "README.md"
-requires-python = ">=3.10"
-license = { text = "MIT" }
-dependencies = []
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Polythene Contributors"},
+]
+dependencies = [
+    "cyclopts>=3.24,<4.0",
+    "plumbum>=1.8,<2.0",
+    "uuid6>=2025.0.1",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-bdd",
+]
+
+[project.scripts]
+polythene = "polythene.__main__:main"
+
+[project.urls]
+homepage = "https://github.com/leynos/polythene"
+repository = "https://github.com/leynos/polythene"
+issues = "https://github.com/leynos/polythene/issues"
 
 [dependency-groups]
 dev = [
-    "pytest",
+    "polythene[test]",
     "ruff",
     "pyright",
     "pytest-timeout",
 ]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["polythene*"]
+
+[tool.setuptools.package-data]
+"polythene" = []
+
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-include = ["polythene"]
+include = ["polythene", "tests"]
 
 [tool.ruff]
 line-length = 88
@@ -95,8 +134,6 @@ timeout = 30
 [tool.uv]
 package = true
 
-
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
-
