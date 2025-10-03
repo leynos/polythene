@@ -6,6 +6,9 @@ import typing as typ
 
 import pytest
 from plumbum import local
+from plumbum.commands.processes import (
+    ProcessTimedOut,
+)
 
 from polythene.cmd_utils import TimeoutConflictError, _merge_timeout, run_cmd
 
@@ -19,7 +22,7 @@ def test_run_cmd_command_logs_and_succeeds(
     result = run_cmd(cmd, fg=True)
     captured = capsys.readouterr()
     assert result == 0
-    assert "echo" in captured.err
+    assert "echo hi" in captured.err
 
 
 def test_run_cmd_adapter_handles_output(capsys: pytest.CaptureFixture[str]) -> None:
@@ -35,7 +38,19 @@ def test_run_cmd_adapter_handles_output(capsys: pytest.CaptureFixture[str]) -> N
 def test_run_cmd_rejects_string_commands() -> None:
     """Passing a bare string raises an informative :class:`TypeError`."""
     with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
-        run_cmd(typ.cast(typ.Any, "echo oops"))
+        run_cmd(typ.cast("typ.Any", "echo oops"))
+
+    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+        run_cmd(typ.cast("typ.Any", b"echo oops"))
+
+    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+        run_cmd(typ.cast("typ.Any", bytearray(b"echo oops")))
+
+    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+        run_cmd(typ.cast("typ.Any", 12345))
+
+    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+        run_cmd(typ.cast("typ.Any", None))
 
 
 def test_run_cmd_timeout_conflict() -> None:
@@ -62,3 +77,38 @@ def test_run_cmd_timeout_passthrough() -> None:
     stub = _Stub()
     assert run_cmd(stub, timeout=5) == 0
     assert calls["timeout"] == 5
+
+
+def test_run_cmd_timeout_with_unsupported_command() -> None:
+    """Providing a timeout to a command without ``run`` raises ``TypeError``."""
+
+    class _NoTimeout:
+        def formulate(self) -> list[str]:
+            return ["noop"]
+
+        def __call__(self, *args: object, **kwargs: object) -> int:
+            return 0
+
+    no_timeout = _NoTimeout()
+
+    with pytest.raises(TypeError, match="timeout execution"):
+        run_cmd(no_timeout, fg=True, timeout=1)
+
+
+def test_run_cmd_timeout_raises_timeout_error_on_expiry() -> None:
+    """Commands that time out propagate :class:`TimeoutError`."""
+
+    class _AlwaysTimeout:
+        def formulate(self) -> list[str]:
+            return ["timeout"]
+
+        def run(self, **kwargs: object) -> object:
+            raise ProcessTimedOut("timeout", 0.0)
+
+        def __call__(self, *args: object, **kwargs: object) -> int:
+            return 0
+
+    cmd = _AlwaysTimeout()
+
+    with pytest.raises(TimeoutError):
+        run_cmd(cmd, fg=True, timeout=1)
