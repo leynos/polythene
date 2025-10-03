@@ -3,13 +3,13 @@ name = "polythene"
 version = "0.1.0"
 description = "A tool for creating and managing containerised environments."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
     {name = "Polythene Contributors"},
 ]
 dependencies = [
-    "typer>=0.9,<1.0",
+    "cyclopts>=3.24,<4.0",
     "plumbum>=1.8,<2.0",
     "uuid6>=2025.0.1",
 ]
@@ -20,9 +20,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Build Tools",

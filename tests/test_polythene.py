@@ -2,22 +2,59 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
+from typing import Callable, Sequence
 
 import pytest
-from typer.testing import CliRunner
 
 import polythene
 
 
+@dataclass(slots=True)
+class CliResult:
+    """Container capturing CLI output and exit status."""
+
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
 @pytest.fixture()
-def cli_runner() -> CliRunner:
-    """Return a Typer CLI runner configured for polythene."""
-    return CliRunner()
+def run_cli() -> Callable[[Sequence[str]], CliResult]:
+    """Return a helper that invokes the Cyclopts app and captures output."""
+
+    def _invoke(args: Sequence[str]) -> CliResult:
+        stdout_buffer = StringIO()
+        stderr_buffer = StringIO()
+        exit_code = 0
+
+        try:
+            with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+                polythene.app(list(args))
+        except SystemExit as exc:  # pragma: no cover - exercised in assertions
+            code = exc.code
+            if code is None:
+                exit_code = 0
+            elif isinstance(code, int):
+                exit_code = code
+            else:
+                exit_code = int(code)
+        return CliResult(
+            exit_code=exit_code,
+            stdout=stdout_buffer.getvalue(),
+            stderr=stderr_buffer.getvalue(),
+        )
+
+    return _invoke
 
 
 def test_cmd_pull_exports_rootfs(
-    cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    run_cli: Callable[[Sequence[str]], CliResult],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """The ``pull`` command exports the rootfs and prints the generated UUID."""
     calls: list[tuple[str, Path, int | None]] = []
@@ -30,8 +67,7 @@ def test_cmd_pull_exports_rootfs(
 
     monkeypatch.setattr(polythene, "export_rootfs", _fake_export)
 
-    result = cli_runner.invoke(
-        polythene.app,
+    result = run_cli(
         [
             "pull",
             "docker.io/library/busybox:latest",
@@ -39,7 +75,7 @@ def test_cmd_pull_exports_rootfs(
             tmp_path.as_posix(),
             "--timeout",
             "30",
-        ],
+        ]
     )
 
     assert result.exit_code == 0
@@ -57,7 +93,9 @@ def test_cmd_pull_exports_rootfs(
 
 
 def test_cmd_exec_uses_first_available_runner(
-    cli_runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    run_cli: Callable[[Sequence[str]], CliResult],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """The ``exec`` command runs using the first available backend."""
     root = tmp_path / "uuid-5678"
@@ -76,8 +114,7 @@ def test_cmd_exec_uses_first_available_runner(
     monkeypatch.setattr(polythene, "run_with_proot", _fail_proot)
     monkeypatch.setattr(polythene, "IS_ROOT", False)
 
-    result = cli_runner.invoke(
-        polythene.app,
+    result = run_cli(
         [
             "exec",
             "uuid-5678",
@@ -88,17 +125,19 @@ def test_cmd_exec_uses_first_available_runner(
             "--",
             "echo",
             "hello world",
-        ],
+        ]
     )
 
     assert result.exit_code == 0
     assert calls == [(root, "echo 'hello world'", 15)]
 
 
-def test_cmd_exec_reports_missing_root(cli_runner: CliRunner, tmp_path: Path) -> None:
+def test_cmd_exec_reports_missing_root(
+    run_cli: Callable[[Sequence[str]], CliResult],
+    tmp_path: Path,
+) -> None:
     """``exec`` exits with an error when the requested rootfs is missing."""
-    result = cli_runner.invoke(
-        polythene.app,
+    result = run_cli(
         [
             "exec",
             "missing",  # UUID that does not exist
@@ -106,7 +145,7 @@ def test_cmd_exec_reports_missing_root(cli_runner: CliRunner, tmp_path: Path) ->
             tmp_path.as_posix(),
             "--",
             "true",
-        ],
+        ]
     )
 
     assert result.exit_code == 1

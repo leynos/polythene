@@ -16,9 +16,8 @@ from __future__ import annotations
 import collections.abc as cabc
 import shlex
 import subprocess
+import sys
 import typing as typ
-
-import typer
 
 __all__ = [
     "run_cmd",
@@ -128,7 +127,7 @@ def run_cmd(
 
     timeout = _merge_timeout(timeout, run_kwargs)
     if isinstance(cmd, cabc.Sequence):
-        typer.echo(f"$ {shlex.join(cmd)}")
+        print(f"$ {shlex.join(cmd)}", file=sys.stderr)
         if run_kwargs:
             msg = (
                 "Sequence commands do not accept keyword arguments: "
@@ -141,7 +140,7 @@ def run_cmd(
         return subprocess.check_call(list(cmd), timeout=timeout)  # noqa: S603
 
     args = list(cmd.formulate())
-    typer.echo(f"$ {shlex.join(args)}")
+    print(f"$ {shlex.join(args)}", file=sys.stderr)
     if fg:
         if timeout is not None:
             if isinstance(cmd, SupportsRun):

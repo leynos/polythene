@@ -34,7 +34,7 @@ via `ty`.
 
 ## Command reference
 
-Polythene exposes two Typer commands. Both commands accept the optional
+Polythene exposes two Cyclopts commands. Both commands accept the optional
 `--store` argument to override the root filesystem directory (defaults to
 `/var/tmp/polythene`).
 
@@ -43,10 +43,10 @@ Polythene exposes two Typer commands. Both commands accept the optional
 Before running commands, decide how they interact with your host. Polythene
 provides a single interface but adapts to the available tooling:
 
-- **Codex sandbox** – You run as root without container engines. `polythene
-  pull` still uses Podman inside the sandbox because Codex maintains the binary
-  on disk, and `polythene exec` falls back to `bwrap`, `proot`, or a privileged
-  `chroot`.
+- **Codex sandbox** – You run as root without container engines. The
+  `polythene pull` command still uses Podman inside the sandbox because Codex
+  maintains the binary on disk, and `polythene exec` falls back to `bwrap`,
+  `proot`, or a privileged `chroot`.
 - **GitHub runners** – You run as an unprivileged user with Podman available.
   The CLI exports images in the same way but typically selects `bwrap` for
   execution, providing equivalent isolation to the Codex workflow.
@@ -140,5 +140,5 @@ Adjust the predicate to match your retention policy.
 
 ## Further reading
 
-Refer to `src/polythene/__init__.py` for the Typer application definition and to
-`tests/test_polythene.py` for integration-style usage examples.
+Refer to `src/polythene/__init__.py` for the Cyclopts application definition
+and to `tests/test_polythene.py` for integration-style usage examples.

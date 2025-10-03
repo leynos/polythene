@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
 # /// script
-# requires-python = ">=3.9"
+# requires-python = ">=3.12"
 # dependencies = [
-#   "typer>=0.9,<1.0",
+#   "cyclopts>=3.24,<4.0",
 #   "plumbum>=1.8,<2.0",
 #   "uuid6>=2025.0.1",
 # ]
@@ -39,8 +39,10 @@ import tempfile
 import time
 import typing as typ
 from pathlib import Path
+from typing import Annotated
 
-import typer
+import cyclopts
+from cyclopts import App, Parameter
 from plumbum.commands.processes import ProcessExecutionError
 from uuid6 import uuid7
 
@@ -75,7 +77,10 @@ IS_ROOT = os.geteuid() == 0
 os.environ.setdefault("CONTAINERS_STORAGE_DRIVER", "vfs")
 os.environ.setdefault("CONTAINERS_EVENTS_BACKEND", "file")
 
-app = typer.Typer(add_completion=False, help="polythene — Temu podman for Codex")
+app = App()
+app.help = "polythene — Temu podman for Codex"
+app.config = (cyclopts.config.Env("POLYTHENE_", command=False),)
+app.end_of_options_delimiter = "--"
 
 __all__ = [
     "app",
@@ -92,44 +97,48 @@ __all__ = [
 
 ExecArgsFn = typ.Callable[[str], list[str]]
 
-IMAGE_ARGUMENT = typer.Argument(
-    ..., help="Image reference, e.g. docker.io/library/busybox:latest"
-)
-PULL_STORE_OPTION = typer.Option(
-    DEFAULT_STORE,
-    "--store",
-    "-s",
-    help="Directory to store UUID rootfs trees",
-    dir_okay=True,
-    file_okay=False,
-)
-PULL_TIMEOUT_OPTION = typer.Option(
-    None,
-    "--timeout",
-    "-t",
-    help="Timeout in seconds for pull and export commands",
-)
+ImageArgument = Annotated[
+    str,
+    Parameter(
+        help="Image reference, e.g. docker.io/library/busybox:latest",
+    ),
+]
+UuidArgument = Annotated[
+    str, Parameter(help="UUID of the exported filesystem (from `polythene pull`)")
+]
+StoreOption = Annotated[
+    Path,
+    Parameter(
+        alias=["-s", "--store"],
+        env_var="POLYTHENE_STORE",
+        help="Directory to store UUID rootfs trees",
+    ),
+]
+TimeoutOption = Annotated[
+    int | None,
+    Parameter(alias=["-t", "--timeout"], help="Timeout in seconds to allow"),
+]
+CommandArgument = Annotated[
+    list[str],
+    Parameter(
+        consume_multiple=True,
+        help="Command and arguments to execute inside the rootfs",
+    ),
+]
 
-UUID_ARGUMENT = typer.Argument(
-    ..., help="UUID of the exported filesystem (from `polythene pull`)"
-)
-CMD_ARGUMENT = typer.Argument(
-    ..., help="Command and arguments to execute inside the rootfs"
-)
-EXEC_STORE_OPTION = typer.Option(
-    DEFAULT_STORE,
-    "--store",
-    "-s",
-    help="Directory where UUID rootfs trees are stored",
-    dir_okay=True,
-    file_okay=False,
-)
-EXEC_TIMEOUT_OPTION = typer.Option(
-    None,
-    "--timeout",
-    "-t",
-    help="Timeout in seconds for command execution",
-)
+
+def _error(message: str) -> None:
+    """Print ``message`` to stderr without additional formatting."""
+
+    print(message, file=sys.stderr)
+
+
+def _normalise_retcode(retcode: int | None) -> int:
+    """Return a sensible exit status when a command lacks a numeric code."""
+
+    if not retcode:
+        return 1
+    return int(retcode)
 
 
 def log(msg: str) -> None:
@@ -162,12 +171,8 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
     try:
         run_cmd(podman["pull", image], fg=True, timeout=timeout)
     except ProcessExecutionError as exc:
-        typer.secho(
-            f"Failed to pull image {image}: {exc}",
-            fg=typer.colors.RED,
-            err=True,
-        )
-        raise typer.Exit(exc.retcode) from exc
+        _error(f"Failed to pull image {image}: {exc}")
+        raise SystemExit(_normalise_retcode(exc.retcode)) from exc
 
     ensure_directory(dest, exist_ok=False)
 
@@ -182,12 +187,8 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
         )
         cid = str(cid_output).strip()
     except ProcessExecutionError as exc:
-        typer.secho(
-            f"Failed to create container from {image}: {exc}",
-            fg=typer.colors.RED,
-            err=True,
-        )
-        raise typer.Exit(exc.retcode) from exc
+        _error(f"Failed to create container from {image}: {exc}")
+        raise SystemExit(_normalise_retcode(exc.retcode)) from exc
     try:
         log(f"Exporting rootfs of {cid} → {dest}")
         # Pipe: podman export CID | tar -C dest -x
@@ -241,7 +242,7 @@ def _probe_bwrap_userns(
             fg=True,
             timeout=timeout,
         )
-    except (ProcessExecutionError, typer.Exit, OSError) as exc:
+    except (ProcessExecutionError, SystemExit, OSError) as exc:
         log(f"User namespace probe failed: {exc}")
         return []
     else:
@@ -268,7 +269,7 @@ def _probe_bwrap_proc(
     try:
         cmd = bwrap[tuple(probe)]
         run_cmd(cmd, fg=True, timeout=timeout)
-    except (ProcessExecutionError, typer.Exit, OSError):
+    except (ProcessExecutionError, SystemExit, OSError):
         return []
     else:
         return ["--proc", "/proc"]
@@ -299,8 +300,8 @@ def _run_with_tool(
 ) -> int | None:
     """Probe *tool_name* and execute *inner_cmd*, returning its exit status.
 
-    Non-zero exits propagate to callers as ``typer.Exit(retcode)`` via the
-    surrounding ``cmd_exec`` handler.
+    Non-zero exits propagate to callers via ``SystemExit`` in the surrounding
+    ``cmd_exec`` handler.
     """
     if ensure_dirs:
         _ensure_dirs(root)
@@ -308,7 +309,7 @@ def _run_with_tool(
     probe_cmd = tool_cmd[tuple(probe_args)]
     try:
         run_cmd(probe_cmd, fg=True, timeout=timeout)
-    except (ProcessExecutionError, typer.Exit, OSError):
+    except (ProcessExecutionError, SystemExit, OSError):
         return None
 
     log(f"Executing via {tool_name}")
@@ -323,7 +324,7 @@ def run_with_bwrap(
     """Attempt to execute ``inner_cmd`` inside ``root`` using bubblewrap."""
     try:
         bwrap = get_command("bwrap")
-    except typer.Exit:
+    except SystemExit:
         return None
     base_flags, proc_flags = _build_bwrap_flags(bwrap, root, timeout=timeout)
 
@@ -381,7 +382,7 @@ def run_with_proot(
     """Attempt to execute ``inner_cmd`` inside ``root`` using proot."""
     try:
         proot = get_command("proot")
-    except typer.Exit:
+    except SystemExit:
         return None
 
     probe_args = ["-R", str(root), "-0", "/bin/sh", "-c", "true"]
@@ -406,7 +407,7 @@ def run_with_chroot(
     """Attempt to execute ``inner_cmd`` inside ``root`` using chroot."""
     try:
         chroot = get_command("chroot")
-    except typer.Exit:
+    except SystemExit:
         return None
 
     probe_args = [str(root), "/bin/sh", "-c", "true"]
@@ -434,11 +435,12 @@ def run_with_chroot(
 # -------------------- CLI commands --------------------
 
 
-@app.command("pull")
+@app.command(name="pull")
 def cmd_pull(
-    image: str = IMAGE_ARGUMENT,
-    store: Path = PULL_STORE_OPTION,
-    timeout: int | None = PULL_TIMEOUT_OPTION,
+    image: ImageArgument,
+    *,
+    store: StoreOption = DEFAULT_STORE,
+    timeout: TimeoutOption = None,
 ) -> None:
     """
     Pull IMAGE and export its filesystem into a new UUIDv7 directory under STORE.
@@ -461,12 +463,13 @@ def cmd_pull(
     print(uid)
 
 
-@app.command("exec")
+@app.command(name="exec")
 def cmd_exec(
-    uuid: str = UUID_ARGUMENT,
-    cmd: list[str] = CMD_ARGUMENT,
-    store: Path = EXEC_STORE_OPTION,
-    timeout: int | None = EXEC_TIMEOUT_OPTION,
+    uuid: UuidArgument,
+    cmd: CommandArgument,
+    *,
+    store: StoreOption = DEFAULT_STORE,
+    timeout: TimeoutOption = None,
 ) -> None:
     """Run ``CMD`` inside the UUID's rootfs with bwrap → proot → chroot fallback.
 
@@ -474,15 +477,13 @@ def cmd_exec(
     An optional timeout can abort long runs.
     """
     if not cmd:
-        typer.secho("No command provided", fg=typer.colors.RED, err=True)
-        raise typer.Exit(2)
+        _error("No command provided")
+        raise SystemExit(2)
 
     root = store_path_for(uuid, store)
     if not root.is_dir():
-        typer.secho(
-            f"No such UUID rootfs: {uuid} ({root})", fg=typer.colors.RED, err=True
-        )
-        raise typer.Exit(1)
+        _error(f"No such UUID rootfs: {uuid} ({root})")
+        raise SystemExit(1)
 
     inner_cmd = " ".join(shlex.quote(x) for x in cmd)
 
@@ -496,24 +497,19 @@ def cmd_exec(
     for runner in runners:
         try:
             rc = runner(root, inner_cmd, timeout=timeout)
-        except ProcessExecutionError as e:
-            # Runner executed and failed; propagate its exit code
-            raise typer.Exit(e.retcode) from e
+        except ProcessExecutionError as exc:
+            raise SystemExit(_normalise_retcode(exc.retcode)) from exc
         if rc is not None:
             if rc == 0:
                 return
-            raise typer.Exit(rc)
+            raise SystemExit(rc)
 
-    typer.secho(
-        "All isolation modes unavailable (bwrap/proot/chroot).",
-        fg=typer.colors.RED,
-        err=True,
-    )
-    raise typer.Exit(126)
+    _error("All isolation modes unavailable (bwrap/proot/chroot).")
+    raise SystemExit(126)
 
 
 def main() -> None:
-    """Invoke the Typer CLI entry point."""
+    """Invoke the Cyclopts CLI entry point."""
     app()
 
 

@@ -9,7 +9,6 @@ import sys
 import typing as typ
 from pathlib import Path
 
-import typer
 from plumbum import local
 
 if typ.TYPE_CHECKING:
@@ -88,24 +87,26 @@ def load_script_helpers() -> ScriptHelperExports:
     )
 
 
+def _abort(message: str, *, code: int) -> typ.NoReturn:
+    """Print an error message and terminate the process with ``code``."""
+
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
+
+
 def get_command(name: str) -> BaseCommand:
     """Return a ``plumbum`` command, exiting with an error if it is missing."""
     try:
         return local[name]
     except Exception as exc:  # pragma: no cover - error path
-        typer.secho(
-            f"Required command not found: {name}",
-            fg=typer.colors.RED,
-            err=True,
-        )
-        raise typer.Exit(127) from exc
+        print(f"Required command not found: {name}", file=sys.stderr)
+        raise SystemExit(127) from exc
 
 
 def ensure_exists(path: Path, message: str) -> None:
     """Exit with an error if ``path`` does not exist."""
     if not path.exists():  # pragma: no cover - defensive check
-        typer.secho(f"error: {message}: {path}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(2)
+        _abort(f"error: {message}: {path}", code=2)
 
 
 def ensure_directory(path: Path, *, exist_ok: bool = True) -> Path:
@@ -118,10 +119,8 @@ def unique_match(paths: PathIterable, *, description: str) -> Path:
     """Return the sole path in ``paths`` or exit with an error."""
     matches = list(paths)
     if len(matches) != 1:
-        typer.secho(
+        _abort(
             f"error: expected exactly one {description}, found {len(matches)}",
-            fg=typer.colors.RED,
-            err=True,
+            code=2,
         )
-        raise typer.Exit(2)
     return matches[0]

@@ -1,10 +1,10 @@
 # Polythene
 
 Polythene packages the Linux packaging helper originally shipped with the
-shared-actions repository. It bundles the Typer-based command line interface,
-its plumbum process helpers, and uuid6 UUID generation so you can pull
-container images and execute commands inside ephemeral root filesystems without
-requiring a full container runtime on the target machine.
+shared-actions repository. It bundles the Cyclopts-based command line
+interface, its plumbum process helpers, and uuid6 UUID generation so you can
+pull container images and execute commands inside ephemeral root filesystems
+without requiring a full container runtime on the target machine.
 
 ## Motivation
 
@@ -17,17 +17,17 @@ user, containers available). The CLI pulls the desired base image, exports it
 to a disposable root filesystem, and then selects the safest available
 execution backend for the host.
 
-The result is portable automation: you can iterate on package verification in
-a Codex workspace and ship the same tests to CI without changing commands or
+The result is portable automation: you can iterate on package verification in a
+Codex workspace and ship the same tests to CI without changing commands or
 rewriting scripts.
 
 ## Dependencies
 
-Polythene targets Python 3.9 and newer. Runtime dependencies are bundled in the
-package metadata and installed automatically when you run the Makefile targets
-below:
+Polythene targets Python 3.12 and newer. Runtime dependencies are bundled in
+the package metadata and installed automatically when you run the Makefile
+targets below:
 
-- [Typer](https://typer.tiangolo.com/) for the command line interface.
+- [Cyclopts](https://pypi.org/project/cyclopts/) for the command line interface.
 - [plumbum](https://plumbum.readthedocs.io/) for running external commands such
   as `podman`, `bwrap`, and `proot`.
 - [uuid6](https://pypi.org/project/uuid6/) for generating collision-resistant
@@ -56,7 +56,7 @@ make all
 
 ## Usage
 
-Polythene exposes a Typer CLI entry point named `polythene`. Run it with
+Polythene exposes a Cyclopts CLI entry point named `polythene`. Run it with
 `uv run` during development:
 
 ```shell
