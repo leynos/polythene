@@ -135,8 +135,9 @@ class PolytheneSession:
             str(self._store_path),
         ]
 
-        default_isolation = self._default_isolation()
-        preferred_isolation = isolation or default_isolation
+        preferred_isolation = isolation
+        if preferred_isolation is None:
+            preferred_isolation = self._default_isolation()
         if preferred_isolation is not None:
             argv.append(f"--isolation={preferred_isolation}")
 
