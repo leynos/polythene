@@ -1,6 +1,5 @@
 # Legacy test placeholder
 
-The shared-actions CI harness still passes ``polythene/unittests`` to pytest
-when exercising Slipcover-based coverage.  The actual tests now live under the
-``tests/`` directory, so this placeholder directory simply ensures that the
-legacy path continues to resolve without errors.
+The test suite moved to the top-level ``tests/`` package, but this legacy
+directory remains so historical references to ``polythene/unittests`` continue
+to resolve.  New tooling should invoke pytest against ``tests/`` directly.
