@@ -246,6 +246,40 @@ def test_cmd_exec_prefers_requested_isolation(
     assert bubblewrap.calls == []
 
 
+def test_cmd_exec_falls_back_when_preferred_unavailable(
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``exec`` falls back to other backends if the preferred one declines."""
+    root = tmp_path / "uuid-fallback"
+    root.mkdir()
+
+    bubblewrap = _DummyBackend(0, name="bubblewrap")
+    proot = _DummyBackend(None, name="proot")
+    chroot = _DummyBackend(0, name="chroot")
+
+    monkeypatch.setattr(isolation, "BACKENDS", (bubblewrap, proot, chroot))
+    monkeypatch.setattr(isolation, "IS_ROOT", True)
+
+    result = run_cli(
+        [
+            "exec",
+            "uuid-fallback",
+            "--store",
+            tmp_path.as_posix(),
+            "--isolation",
+            "proot",
+            "--",
+            "true",
+        ]
+    )
+
+    assert result.exit_code == 0
+    assert proot.calls == [(root, "true", None)]
+    assert bubblewrap.calls == [(root, "true", None)]
+
+
 def test_cmd_exec_reads_isolation_from_environment(
     run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     monkeypatch: pytest.MonkeyPatch,

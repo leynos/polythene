@@ -70,6 +70,9 @@ CommandArgument = typ.Annotated[
 ]
 
 IsolationName = typ.Literal["bubblewrap", "proot", "chroot"]
+ISOLATION_NAMES: tuple[IsolationName, ...] = typ.cast(
+    "tuple[IsolationName, ...]", typ.get_args(IsolationName)
+)
 IsolationOption = typ.Annotated[
     IsolationName | None,
     Parameter(
@@ -259,8 +262,10 @@ __all__ = (
     "BACKENDS",
     "CONTAINER_TMP",
     "DEFAULT_STORE",
+    "ISOLATION_NAMES",
     "IS_ROOT",
     "VERBOSE",
+    "IsolationName",
     "app",
     "cmd_exec",
     "cmd_pull",

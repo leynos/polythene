@@ -8,11 +8,9 @@ import shlex
 import typing as typ
 from pathlib import Path
 
-from .isolation import DEFAULT_STORE
+from .isolation import DEFAULT_STORE, ISOLATION_NAMES, IsolationName
 
 __all__ = ["PolytheneSession"]
-
-IsolationName = typ.Literal["bubblewrap", "proot", "chroot"]
 
 
 class SandboxRunner(typ.Protocol):
@@ -37,9 +35,7 @@ def _normalise_store(store: Path | str | None) -> Path:
 
 def _is_truthy(value: str | None) -> bool:
     """Return ``True`` when ``value`` represents an enabled flag."""
-    if value is None:
-        return False
-    return value.lower() in {"1", "true", "yes", "on"}
+    return False if value is None else value.lower() in {"1", "true", "yes", "on"}
 
 
 @dc.dataclass(slots=True)
@@ -75,7 +71,7 @@ class PolytheneSession:
         # Copy the environment once to avoid accidental mutation during calls.
         self._env = dict(os.environ if self.env is None else self.env)
 
-    def exec(
+    def run(
         self,
         uuid: str,
         command: typ.Sequence[str] | str,
@@ -149,11 +145,13 @@ class PolytheneSession:
         return argv
 
     def _default_isolation(self) -> IsolationName | None:
-        explicit = self._env.get("POLYTHENE_ISOLATION")
-        if explicit:
+        if explicit := self._env.get("POLYTHENE_ISOLATION"):
+            if explicit not in ISOLATION_NAMES:
+                msg = (
+                    "Invalid POLYTHENE_ISOLATION value."
+                    " Supported values: " + ", ".join(ISOLATION_NAMES)
+                )
+                raise ValueError(msg)
             return typ.cast("IsolationName", explicit)
 
-        if _is_truthy(self._env.get("GITHUB_ACTIONS")):
-            return "proot"
-
-        return None
+        return "proot" if _is_truthy(self._env.get("GITHUB_ACTIONS")) else None
