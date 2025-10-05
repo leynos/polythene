@@ -17,6 +17,7 @@ from .isolation import (
     main,
     store_path_for,
 )
+from .session import PolytheneSession
 
 __all__ = (
     "BACKENDS",
@@ -24,6 +25,7 @@ __all__ = (
     "DEFAULT_STORE",
     "IS_ROOT",
     "VERBOSE",
+    "PolytheneSession",
     "app",
     "cmd_exec",
     "cmd_pull",

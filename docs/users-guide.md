@@ -93,6 +93,11 @@ Each backend receives the prepared filesystem as its root and blocks network
 access. If none of the backends is available, the command fails with an error
 message detailing the missing tooling.
 
+When a specific backend is preferable, pass `--isolation=<backend>` to reorder
+the probing sequence. GitHub runners lack user namespace support for `bwrap`,
+and specifying `--isolation=proot` avoids the noisy permission errors emitted
+by bubblewrap before `proot` succeeds.
+
 Because the same UUID works across hosts, you can prepare an image on Codex and
 reuse it on CI:
 
@@ -111,6 +116,10 @@ Polythene recognises the following environment variables:
 - `POLYTHENE_STORE` – Directory to hold exported root filesystems. Defaults to
   `/var/tmp/polythene`. Command line options take precedence over the variable.
 - `POLYTHENE_VERBOSE` – Enable verbose logging when set to any value.
+- `POLYTHENE_ISOLATION` – Preferred isolation backend used when no
+  `--isolation` flag is provided. The CLI and `PolytheneSession` helper both
+  honour the value and fall back to their built-in defaults when the variable
+  is unset.
 
 The CLI also sets two Podman hardening variables if they are not already set:
 `CONTAINERS_STORAGE_DRIVER=vfs` and `CONTAINERS_EVENTS_BACKEND=file`.

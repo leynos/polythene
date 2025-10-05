@@ -69,6 +69,22 @@ CommandArgument = typ.Annotated[
     ),
 ]
 
+IsolationName = typ.Literal["bubblewrap", "proot", "chroot"]
+ISOLATION_NAMES: tuple[IsolationName, ...] = typ.cast(
+    "tuple[IsolationName, ...]", typ.get_args(IsolationName)
+)
+IsolationOption = typ.Annotated[
+    IsolationName | None,
+    Parameter(
+        alias=["-i", "--isolation"],
+        env_var="POLYTHENE_ISOLATION",
+        help=(
+            "Preferred isolation backend. When provided, the requested backend "
+            "is probed first with the remaining fallbacks tried afterwards."
+        ),
+    ),
+]
+
 
 def _error(message: str) -> None:
     """Print ``message`` to stderr without additional formatting."""
@@ -188,8 +204,9 @@ def cmd_exec(
     *,
     store: StoreOption = DEFAULT_STORE,
     timeout: TimeoutOption = None,
+    isolation: IsolationOption = None,
 ) -> None:
-    """Run ``CMD`` inside the UUID's rootfs with bwrap → proot → chroot fallback."""
+    """Run ``CMD`` inside the UUID's rootfs with configurable backend priority."""
     if not cmd:
         _error("No command provided")
         raise SystemExit(2)
@@ -201,7 +218,18 @@ def cmd_exec(
 
     inner_cmd = " ".join(shlex.quote(x) for x in cmd)
 
-    for backend in BACKENDS:
+    selected_backends = BACKENDS
+    if isolation is not None:
+        backends_by_name = {backend.name: backend for backend in BACKENDS}
+        try:
+            preferred = backends_by_name[isolation]
+        except KeyError:
+            _error(f"Unsupported isolation backend requested: {isolation}")
+            raise SystemExit(2) from None
+        remaining = [backend for backend in BACKENDS if backend is not preferred]
+        selected_backends = (preferred, *remaining)
+
+    for backend in selected_backends:
         if backend.requires_root and not IS_ROOT:
             continue
         try:
@@ -234,8 +262,10 @@ __all__ = (
     "BACKENDS",
     "CONTAINER_TMP",
     "DEFAULT_STORE",
+    "ISOLATION_NAMES",
     "IS_ROOT",
     "VERBOSE",
+    "IsolationName",
     "app",
     "cmd_exec",
     "cmd_pull",

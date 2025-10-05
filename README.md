@@ -79,6 +79,12 @@ The execution command runs the provided program inside the root filesystem. It
 tries `bwrap` first, then `proot`, and finally `chroot`. You can override the
 store location per command with `--store`.
 
+Specify `--isolation=<backend>` to prefer a particular sandbox when the host
+has known restrictions. For example, GitHub runners benefit from
+`--isolation=proot` because bubblewrap cannot map user namespaces. Set
+`POLYTHENE_ISOLATION` to apply the same preference automatically for CLI
+invocations and the `PolytheneSession` helper.
+
 For example, you can install and test a package using the same commands in
 Codex and CI:
 
