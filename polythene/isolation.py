@@ -61,11 +61,12 @@ TimeoutOption = typ.Annotated[
     int | None,
     Parameter(alias=["-t", "--timeout"], help="Timeout in seconds to allow"),
 ]
-CommandArgument = typ.Annotated[
-    list[str],
+CommandToken = typ.Annotated[
+    str,
     Parameter(
-        consume_multiple=True,
+        name="CMD",
         help="Command and arguments to execute inside the rootfs",
+        allow_leading_hyphen=True,
     ),
 ]
 
@@ -200,8 +201,7 @@ def cmd_pull(
 @app.command(name="exec")
 def cmd_exec(
     uuid: UuidArgument,
-    cmd: CommandArgument,
-    *,
+    *cmd: CommandToken,
     store: StoreOption = DEFAULT_STORE,
     timeout: TimeoutOption = None,
     isolation: IsolationOption = None,
@@ -216,7 +216,8 @@ def cmd_exec(
         _error(f"No such UUID rootfs: {uuid} ({root})")
         raise SystemExit(1)
 
-    inner_cmd = " ".join(shlex.quote(x) for x in cmd)
+    tokens = list(cmd)
+    inner_cmd = " ".join(shlex.quote(x) for x in tokens)
 
     selected_backends = BACKENDS
     if isolation is not None:

@@ -93,10 +93,11 @@ Each backend receives the prepared filesystem as its root and blocks network
 access. If none of the backends is available, the command fails with an error
 message detailing the missing tooling.
 
-When a specific backend is preferable, pass `--isolation=<backend>` to reorder
-the probing sequence. GitHub runners lack user namespace support for `bwrap`,
-and specifying `--isolation=proot` avoids the noisy permission errors emitted
-by bubblewrap before `proot` succeeds.
+When a specific backend is preferable, pass `--isolation <backend>` (or the
+equivalent `--isolation=<backend>` form) to reorder the probing sequence.
+GitHub runners lack user namespace support for `bwrap`, and specifying
+`--isolation proot` avoids the noisy permission errors emitted by bubblewrap
+before `proot` succeeds.
 
 Because the same UUID works across hosts, you can prepare an image on Codex and
 reuse it on CI:

@@ -208,8 +208,8 @@ def test_cmd_exec_requires_command(
         ]
     )
 
-    assert result.exit_code == 1
-    assert "requires an argument" in result.stdout
+    assert result.exit_code == 2
+    assert "No command provided" in result.stderr
 
 
 def test_cmd_exec_prefers_requested_isolation(
@@ -234,8 +234,7 @@ def test_cmd_exec_prefers_requested_isolation(
             "uuid-preferred",
             "--store",
             tmp_path.as_posix(),
-            "--isolation",
-            "proot",
+            "--isolation=proot",
             "--",
             "true",
         ]
@@ -334,6 +333,28 @@ def test_cmd_exec_rejects_unknown_isolation(
 
     assert result.exit_code == 1
     assert 'Invalid value for "--isolation"' in result.stdout
+
+
+def test_module_exec_accepts_isolation_option(
+    run_module_cli: typ.Callable[[typ.Sequence[str]], CliResult],
+    tmp_path: Path,
+) -> None:
+    """``python -m polythene`` honours isolation options between arguments."""
+    result = run_module_cli(
+        [
+            "exec",
+            "missing",  # UUID that does not exist
+            "--store",
+            tmp_path.as_posix(),
+            "--isolation",
+            "proot",
+            "--",
+            "true",
+        ]
+    )
+
+    assert result.exit_code == 1
+    assert "No such UUID rootfs" in result.stderr
 
 
 def test_module_main_delegates_to_package_main(

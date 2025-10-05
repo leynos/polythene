@@ -139,7 +139,7 @@ class PolytheneSession:
         if preferred_isolation is None:
             preferred_isolation = self._default_isolation()
         if preferred_isolation is not None:
-            argv.append(f"--isolation={preferred_isolation}")
+            argv.extend(["--isolation", preferred_isolation])
 
         argv.append("--")
         argv.extend(tokens)

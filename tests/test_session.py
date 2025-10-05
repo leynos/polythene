@@ -46,7 +46,8 @@ def test_session_run_includes_store_and_command(tmp_path: Path) -> None:
         "--store",
         tmp_path.as_posix(),
     ]
-    assert "--isolation=bubblewrap" in argv
+    isolation_idx = argv.index("--isolation")
+    assert argv[isolation_idx + 1] == "bubblewrap"
     assert argv[-2:] == ["echo", "hello"]
     assert timeout == 5
 
@@ -63,7 +64,8 @@ def test_session_defaults_to_proot_on_github(
     session.run("uuid-2", "echo hi")
 
     argv, _ = sandbox.calls[-1]
-    assert "--isolation=proot" in argv
+    isolation_idx = argv.index("--isolation")
+    assert argv[isolation_idx + 1] == "proot"
 
 
 def test_session_respects_explicit_isolation_env(
@@ -78,7 +80,8 @@ def test_session_respects_explicit_isolation_env(
     session.run("uuid-3", ["true"])
 
     argv, _ = sandbox.calls[-1]
-    assert "--isolation=chroot" in argv
+    isolation_idx = argv.index("--isolation")
+    assert argv[isolation_idx + 1] == "chroot"
 
 
 def test_session_run_rejects_empty_command(tmp_path: Path) -> None:
