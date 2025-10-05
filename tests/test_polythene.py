@@ -83,9 +83,16 @@ def test_cmd_pull_retries_existing_uuid(
 
 
 class _DummyBackend:
-    def __init__(self, return_code: int | None, *, requires_root: bool = False) -> None:
+    def __init__(
+        self,
+        return_code: int | None,
+        *,
+        requires_root: bool = False,
+        name: str = "dummy",
+    ) -> None:
         self.return_code = return_code
         self.requires_root = requires_root
+        self.name = name
         self.calls: list[tuple[Path, str, int | None]] = []
 
     def run(
@@ -203,6 +210,65 @@ def test_cmd_exec_requires_command(
 
     assert result.exit_code == 1
     assert "requires an argument" in result.stdout
+
+
+def test_cmd_exec_prefers_requested_isolation(
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``--isolation`` reorders backend probing to honour the preference."""
+    root = tmp_path / "uuid-preferred"
+    root.mkdir()
+
+    bubblewrap = _DummyBackend(0, name="bubblewrap")
+    proot = _DummyBackend(0, name="proot")
+    chroot = _DummyBackend(0, name="chroot")
+
+    monkeypatch.setattr(isolation, "BACKENDS", (bubblewrap, proot, chroot))
+    monkeypatch.setattr(isolation, "IS_ROOT", True)
+
+    result = run_cli(
+        [
+            "exec",
+            "uuid-preferred",
+            "--store",
+            tmp_path.as_posix(),
+            "--isolation",
+            "proot",
+            "--",
+            "true",
+        ]
+    )
+
+    assert result.exit_code == 0
+    assert proot.calls == [(root, "true", None)]
+    assert bubblewrap.calls == []
+
+
+def test_cmd_exec_rejects_unknown_isolation(
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
+    tmp_path: Path,
+) -> None:
+    """An unknown isolation backend is reported as a CLI error."""
+    rootfs = tmp_path / "uuid-unknown"
+    rootfs.mkdir()
+
+    result = run_cli(
+        [
+            "exec",
+            "uuid-unknown",
+            "--store",
+            tmp_path.as_posix(),
+            "--isolation",
+            "unknown",  # not one of the registered backends
+            "--",
+            "true",
+        ]
+    )
+
+    assert result.exit_code == 1
+    assert "Invalid value for \"--isolation\"" in result.stdout
 
 
 def test_module_main_delegates_to_package_main(
