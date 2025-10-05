@@ -246,6 +246,37 @@ def test_cmd_exec_prefers_requested_isolation(
     assert bubblewrap.calls == []
 
 
+def test_cmd_exec_reads_isolation_from_environment(
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The CLI honours ``POLYTHENE_ISOLATION`` when no flag is provided."""
+    root = tmp_path / "uuid-env"
+    root.mkdir()
+
+    bubblewrap = _DummyBackend(0, name="bubblewrap")
+    proot = _DummyBackend(0, name="proot")
+    monkeypatch.setattr(isolation, "BACKENDS", (bubblewrap, proot))
+    monkeypatch.setattr(isolation, "IS_ROOT", True)
+    monkeypatch.setenv("POLYTHENE_ISOLATION", "proot")
+
+    result = run_cli(
+        [
+            "exec",
+            "uuid-env",
+            "--store",
+            tmp_path.as_posix(),
+            "--",
+            "true",
+        ]
+    )
+
+    assert result.exit_code == 0
+    assert proot.calls == [(root, "true", None)]
+    assert bubblewrap.calls == []
+
+
 def test_cmd_exec_rejects_unknown_isolation(
     run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     tmp_path: Path,
@@ -268,7 +299,7 @@ def test_cmd_exec_rejects_unknown_isolation(
     )
 
     assert result.exit_code == 1
-    assert "Invalid value for \"--isolation\"" in result.stdout
+    assert 'Invalid value for "--isolation"' in result.stdout
 
 
 def test_module_main_delegates_to_package_main(

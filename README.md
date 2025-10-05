@@ -81,7 +81,9 @@ store location per command with `--store`.
 
 Specify `--isolation=<backend>` to prefer a particular sandbox when the host
 has known restrictions. For example, GitHub runners benefit from
-`--isolation=proot` because bubblewrap cannot map user namespaces.
+`--isolation=proot` because bubblewrap cannot map user namespaces. Set
+`POLYTHENE_ISOLATION` to apply the same preference automatically for CLI
+invocations and the `PolytheneSession` helper.
 
 For example, you can install and test a package using the same commands in
 Codex and CI:

@@ -74,6 +74,7 @@ IsolationOption = typ.Annotated[
     IsolationName | None,
     Parameter(
         alias=["-i", "--isolation"],
+        env_var="POLYTHENE_ISOLATION",
         help=(
             "Preferred isolation backend. When provided, the requested backend "
             "is probed first with the remaining fallbacks tried afterwards."
