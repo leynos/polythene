@@ -52,6 +52,18 @@ def test_session_run_includes_store_and_command(tmp_path: Path) -> None:
     assert timeout == 5
 
 
+def test_build_exec_argv_emits_split_isolation_flag(tmp_path: Path) -> None:
+    """Isolation arguments are emitted as separate tokens."""
+    sandbox = _RecordingSandbox()
+    session = PolytheneSession(sandbox, store=tmp_path)
+
+    argv = session._build_exec_argv("uuid-iso", ["true"], "proot")
+
+    isolation_idx = argv.index("--isolation")
+    assert argv[isolation_idx + 1] == "proot"
+    assert all(not token.startswith("--isolation=") for token in argv)
+
+
 def test_session_defaults_to_proot_on_github(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -66,6 +78,7 @@ def test_session_defaults_to_proot_on_github(
     argv, _ = sandbox.calls[-1]
     isolation_idx = argv.index("--isolation")
     assert argv[isolation_idx + 1] == "proot"
+    assert "--isolation=proot" not in argv
 
 
 def test_session_respects_explicit_isolation_env(
