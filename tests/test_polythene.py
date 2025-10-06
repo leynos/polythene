@@ -108,6 +108,23 @@ class _DummyBackend:
         return self.return_code
 
 
+def test_cmd_exec_accepts_list_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Programmatic callers may keep passing list command tokens."""
+    root = tmp_path / "uuid-list"
+    root.mkdir(parents=True)
+
+    backend = _DummyBackend(0)
+    monkeypatch.setattr(isolation, "BACKENDS", (backend,))
+    monkeypatch.setattr(isolation, "IS_ROOT", True)
+
+    isolation.cmd_exec("uuid-list", ["echo", "hello world"], store=tmp_path)
+
+    assert backend.calls == [(root, "echo 'hello world'", None)]
+
+
 def test_cmd_exec_uses_first_available_backend(
     run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     monkeypatch: pytest.MonkeyPatch,
