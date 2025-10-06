@@ -5,13 +5,14 @@ from __future__ import annotations
 import importlib
 import typing as typ
 
+import pytest
+
 import polythene
 import polythene.isolation as isolation
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
     from conftest import CliResult
 
 
@@ -108,6 +109,53 @@ class _DummyBackend:
         return self.return_code
 
 
+def test_normalise_command_args_flattens_single_sequence() -> None:
+    """Internal helpers flatten nested command sequences."""
+    tokens = isolation._normalise_command_args((["echo", "hello"],))
+
+    assert tokens == ["echo", "hello"]
+
+
+def test_normalise_command_args_rejects_non_strings() -> None:
+    """Non-string command tokens raise a descriptive ``TypeError``."""
+    with pytest.raises(TypeError, match="Command tokens must be strings"):
+        isolation._normalise_command_args(((42,),))
+
+
+def test_cmd_exec_accepts_list_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Programmatic callers may keep passing list command tokens."""
+    root = tmp_path / "uuid-list"
+    root.mkdir(parents=True)
+
+    backend = _DummyBackend(0)
+    monkeypatch.setattr(isolation, "BACKENDS", (backend,))
+    monkeypatch.setattr(isolation, "IS_ROOT", True)
+
+    isolation.cmd_exec("uuid-list", ["echo", "hello world"], store=tmp_path)
+
+    assert backend.calls == [(root, "echo 'hello world'", None)]
+
+
+def test_cmd_exec_accepts_varargs_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Vararg command tokens remain supported alongside list calls."""
+    root = tmp_path / "uuid-varargs"
+    root.mkdir(parents=True)
+
+    backend = _DummyBackend(0)
+    monkeypatch.setattr(isolation, "BACKENDS", (backend,))
+    monkeypatch.setattr(isolation, "IS_ROOT", True)
+
+    isolation.cmd_exec("uuid-varargs", "echo", "hello", store=tmp_path)
+
+    assert backend.calls == [(root, "echo hello", None)]
+
+
 def test_cmd_exec_uses_first_available_backend(
     run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     monkeypatch: pytest.MonkeyPatch,
@@ -139,6 +187,35 @@ def test_cmd_exec_uses_first_available_backend(
     assert result.exit_code == 0
     assert primary.calls == [(root, "echo 'hello world'", 15)]
     assert fallback.calls == []
+
+
+def test_cmd_exec_allows_leading_hyphen_arguments(
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Command tokens beginning with ``-`` are passed through verbatim."""
+    root = tmp_path / "uuid-hyphen"
+    root.mkdir(parents=True)
+
+    backend = _DummyBackend(0)
+    monkeypatch.setattr(isolation, "BACKENDS", (backend,))
+    monkeypatch.setattr(isolation, "IS_ROOT", True)
+
+    result = run_cli(
+        [
+            "exec",
+            "uuid-hyphen",
+            "--store",
+            tmp_path.as_posix(),
+            "--",
+            "-l",
+            "--colour",
+        ]
+    )
+
+    assert result.exit_code == 0
+    assert backend.calls == [(root, "-l --colour", None)]
 
 
 def test_cmd_exec_reports_missing_root(
@@ -208,8 +285,8 @@ def test_cmd_exec_requires_command(
         ]
     )
 
-    assert result.exit_code == 1
-    assert "requires an argument" in result.stdout
+    assert result.exit_code == 2
+    assert "No command provided" in result.stderr
 
 
 def test_cmd_exec_prefers_requested_isolation(
@@ -234,8 +311,7 @@ def test_cmd_exec_prefers_requested_isolation(
             "uuid-preferred",
             "--store",
             tmp_path.as_posix(),
-            "--isolation",
-            "proot",
+            "--isolation=proot",
             "--",
             "true",
         ]
@@ -334,6 +410,49 @@ def test_cmd_exec_rejects_unknown_isolation(
 
     assert result.exit_code == 1
     assert 'Invalid value for "--isolation"' in result.stdout
+
+
+def test_module_exec_accepts_isolation_option(
+    run_module_cli: typ.Callable[[typ.Sequence[str]], CliResult],
+    tmp_path: Path,
+) -> None:
+    """``python -m polythene`` honours isolation options between arguments."""
+    result = run_module_cli(
+        [
+            "exec",
+            "missing",  # UUID that does not exist
+            "--store",
+            tmp_path.as_posix(),
+            "--isolation",
+            "proot",
+            "--",
+            "true",
+        ]
+    )
+
+    assert result.exit_code == 1
+    assert "No such UUID rootfs" in result.stderr
+
+
+def test_module_exec_accepts_isolation_equals_option(
+    run_module_cli: typ.Callable[[typ.Sequence[str]], CliResult],
+    tmp_path: Path,
+) -> None:
+    """``python -m polythene`` honours isolation options with equals form."""
+    result = run_module_cli(
+        [
+            "exec",
+            "missing",  # UUID that does not exist
+            "--store",
+            tmp_path.as_posix(),
+            "--isolation=proot",
+            "--",
+            "true",
+        ]
+    )
+
+    assert result.exit_code == 1
+    assert "No such UUID rootfs" in result.stderr
 
 
 def test_module_main_delegates_to_package_main(

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import typing as typ
+from collections import abc as cabc
 from pathlib import Path
 
 import cyclopts
@@ -61,13 +62,40 @@ TimeoutOption = typ.Annotated[
     int | None,
     Parameter(alias=["-t", "--timeout"], help="Timeout in seconds to allow"),
 ]
-CommandArgument = typ.Annotated[
-    list[str],
+CommandToken = typ.Annotated[
+    str,
     Parameter(
-        consume_multiple=True,
+        name="CMD",
         help="Command and arguments to execute inside the rootfs",
+        allow_leading_hyphen=True,
     ),
 ]
+
+
+def _coerce_command_tokens(
+    candidates: cabc.Sequence[typ.Any],
+) -> list[str]:
+    """Return a list of string command tokens or raise ``TypeError``."""
+    tokens: list[str] = []
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            message = (
+                "Command tokens must be strings; received "
+                f"{candidate!r} (type {type(candidate).__name__})"
+            )
+            raise TypeError(message)
+        tokens.append(candidate)
+    return tokens
+
+
+def _normalise_command_args(cmd: tuple[CommandToken, ...]) -> list[str]:
+    """Flatten ``cmd`` so public callers can keep passing list arguments."""
+    if len(cmd) == 1:
+        (sole,) = cmd
+        if isinstance(sole, cabc.Sequence) and not isinstance(sole, str | bytes):
+            return _coerce_command_tokens(sole)
+    return _coerce_command_tokens(cmd)
+
 
 IsolationName = typ.Literal["bubblewrap", "proot", "chroot"]
 ISOLATION_NAMES: tuple[IsolationName, ...] = typ.cast(
@@ -200,8 +228,7 @@ def cmd_pull(
 @app.command(name="exec")
 def cmd_exec(
     uuid: UuidArgument,
-    cmd: CommandArgument,
-    *,
+    *cmd: CommandToken,
     store: StoreOption = DEFAULT_STORE,
     timeout: TimeoutOption = None,
     isolation: IsolationOption = None,
@@ -216,7 +243,8 @@ def cmd_exec(
         _error(f"No such UUID rootfs: {uuid} ({root})")
         raise SystemExit(1)
 
-    inner_cmd = " ".join(shlex.quote(x) for x in cmd)
+    tokens = _normalise_command_args(cmd)
+    inner_cmd = " ".join(shlex.quote(x) for x in tokens)
 
     selected_backends = BACKENDS
     if isolation is not None:
