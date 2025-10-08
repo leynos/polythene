@@ -187,7 +187,7 @@ def _prepare_proot(
         run_cmd(proot[tuple(probe_args)], fg=True, timeout=timeout)
     except (ProcessExecutionError, SystemExit, OSError):
         return None
-    return ["-R", str(root), "-0", "/bin/sh", "-lc", inner_cmd]
+    return ["-R", str(root), "-0", "/bin/sh", "-c", inner_cmd]
 
 
 def _prepare_chroot(
