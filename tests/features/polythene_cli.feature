@@ -22,3 +22,11 @@ Feature: Polythene CLI interactions
     When I run the CLI with arguments "exec missing --store {store} -- true"
     Then the CLI exits with code 1
     And stderr contains "No such UUID rootfs"
+
+  Scenario: Executing via proot avoids login shell side effects
+    Given a clean store directory
+    And the rootfs "uuid-proot" exists
+    And proot execution is stubbed
+    When I run the CLI with arguments "exec uuid-proot --store {store} -- true"
+    Then the CLI exits with code 0
+    And proot ran without requesting a login shell

@@ -70,3 +70,39 @@ def test_prepare_proot_avoids_login_shell(
         "-c",
         inner_cmd,
     ]
+
+
+def test_proot_backend_run_uses_non_login_shell(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``Backend.run`` should propagate the non-login shell into execution."""
+    backend = next(b for b in backends.create_backends() if b.name == "proot")
+    stub = _StubCommand()
+    executed: list[tuple[str, ...]] = []
+
+    def fake_get_command(binary: str) -> _StubCommand:
+        assert binary == backend.binary
+        return stub
+
+    def fake_run_cmd(cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
+        executed.append(cmd)
+        return 0
+
+    monkeypatch.setattr(backends, "get_command", fake_get_command)
+    monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
+
+    rc = backend.run(
+        tmp_path,
+        "echo hi",
+        timeout=None,
+        logger=lambda _msg: None,
+        container_tmp=tmp_path,
+    )
+
+    assert rc == 0
+    assert len(stub.calls) == 2
+    probe_call, exec_call = stub.calls
+    assert probe_call[-2:] == ("-c", "true")
+    assert exec_call[-2] == "-c"
+    assert exec_call[-1] == "echo hi"
+    assert executed == stub.calls
