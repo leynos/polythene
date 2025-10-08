@@ -69,10 +69,14 @@ def stub_export(monkeypatch: pytest.MonkeyPatch) -> None:
 def stub_proot(monkeypatch: pytest.MonkeyPatch, cli_context: Context) -> None:
     """Limit execution to proot and record its invocations."""
     proot_backend = next(
-        backend
-        for backend in backend_module.create_backends()
-        if backend.name == "proot"
+        (
+            backend
+            for backend in backend_module.create_backends()
+            if backend.name == "proot"
+        ),
+        None,
     )
+    assert proot_backend is not None, "proot backend not available for tests"
     stub = _RecordingCommand()
     executions: list[tuple[str, ...]] = []
 
@@ -151,11 +155,11 @@ def assert_rootfs_exists(cli_context: Context, uuid: str) -> None:
 @then("proot ran without requesting a login shell")
 def assert_proot_non_login(cli_context: Context) -> None:
     """Verify that the stubbed proot invocation avoids ``-lc``."""
-    stub = cli_context.get("proot_stub")
-    executions = cli_context.get("proot_executions")
-    assert isinstance(stub, _RecordingCommand)
-    assert isinstance(executions, list)
+    stub = typ.cast("_RecordingCommand", cli_context["proot_stub"])
+    executions = typ.cast("list[tuple[str, ...]]", cli_context["proot_executions"])
     assert stub.calls == executions
+    # Ensure no login shell was requested anywhere
+    assert all("-lc" not in call for call in stub.calls)
     assert len(stub.calls) == 2
     probe_call, exec_call = stub.calls
     assert probe_call[-2:] == ("-c", "true")
