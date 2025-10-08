@@ -169,7 +169,7 @@ def _prepare_bwrap(
         "--chdir",
         "/",
         "/bin/sh",
-        "-lc",
+        "-c",
         inner_cmd,
     ]
 

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import pathlib
 import typing as typ
-
-import pytest
 
 from polythene import backends
 
 if typ.TYPE_CHECKING:
+    import pathlib
+
+    import pytest
     from plumbum.commands.base import BaseCommand
 else:  # pragma: no cover - runtime sentinel for typing-only import
     BaseCommand = typ.Any  # type: ignore[assignment]
@@ -35,11 +35,11 @@ def test_prepare_proot_avoids_login_shell(
     unexpected ways.  The probe command already uses ``-c`` so the execution
     command should mirror it to ensure a consistent environment.
     """
-    assert isinstance(tmp_path, pathlib.Path)
-    assert isinstance(monkeypatch, pytest.MonkeyPatch)
     stub = _StubCommand()
+    run_calls: list[tuple[str, ...]] = []
 
     def fake_run_cmd(cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
+        run_calls.append(cmd)
         return 0
 
     monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
@@ -62,6 +62,16 @@ def test_prepare_proot_avoids_login_shell(
         "-c",
         "true",
     )
+    assert run_calls == [
+        (
+            "-R",
+            str(tmp_path),
+            "-0",
+            "/bin/sh",
+            "-c",
+            "true",
+        )
+    ]
     assert result == [
         "-R",
         str(tmp_path),
