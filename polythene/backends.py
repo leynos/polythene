@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import errno
 import typing as typ
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from .script_utils import ensure_directory, get_command
 
 __all__ = [
     "Backend",
+    "BubblewrapUnavailable",
     "create_backends",
     "ensure_runtime_paths",
 ]
@@ -24,6 +26,17 @@ Logger = typ.Callable[[str], None]
 PrepareFn = typ.Callable[
     [BaseCommand, Path, str, Logger, int | None, Path], list[str] | None
 ]
+
+
+class BubblewrapUnavailable(RuntimeError):  # noqa: N818 - aligns with CLI wording
+    """Raised when the host kernel forbids bubblewrap user namespaces."""
+
+
+_UNPRIVILEGED_USERNS_PATH = Path("/proc/sys/kernel/unprivileged_userns_clone")
+_BWRAP_SYSCTL_DISABLED = (
+    "bubblewrap requires unprivileged user namespaces; falling back to proot"
+)
+_BWRAP_PERMISSION_DENIED = "unprivileged user namespaces disabled"
 
 
 @dc.dataclass(slots=True, frozen=True)
@@ -44,8 +57,8 @@ class Backend:
         timeout: int | None,
         logger: Logger,
         container_tmp: Path,
-    ) -> int | None:
-        """Probe and run the backend, returning the exit status."""
+    ) -> tuple[str, int] | None:
+        """Probe and run the backend, returning the chosen name and exit status."""
         try:
             tool = get_command(self.binary)
         except SystemExit:
@@ -60,7 +73,8 @@ class Backend:
 
         logger(f"Executing via {self.name}")
         result = run_cmd(tool[tuple(args)], fg=True, timeout=timeout)
-        return int(result) if result is not None else 0
+        exit_code = int(result) if result is not None else 0
+        return (self.name, exit_code)
 
 
 def ensure_runtime_paths(root: Path) -> None:
@@ -75,6 +89,16 @@ def _probe_bwrap_userns(
     timeout: int | None,
     logger: Logger,
 ) -> list[str]:
+    try:
+        value = _UNPRIVILEGED_USERNS_PATH.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger(f"Unable to read /proc/sys/kernel/unprivileged_userns_clone: {exc}")
+    else:
+        if value == "0":
+            raise BubblewrapUnavailable(_BWRAP_SYSCTL_DISABLED)
+
     try:
         run_cmd(
             bwrap[
@@ -94,6 +118,15 @@ def _probe_bwrap_userns(
             timeout=timeout,
         )
     except (ProcessExecutionError, SystemExit, OSError) as exc:
+        if isinstance(exc, ProcessExecutionError):
+            stderr = exc.stderr or ""
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode(errors="ignore")
+            errno_value = getattr(exc, "errno", None)
+            if "Permission denied" in str(stderr) or errno_value == errno.EPERM:
+                raise BubblewrapUnavailable(_BWRAP_PERMISSION_DENIED) from exc
+        if isinstance(exc, OSError) and exc.errno == errno.EPERM:
+            raise BubblewrapUnavailable(_BWRAP_PERMISSION_DENIED) from exc
         logger(f"User namespace probe failed: {exc}")
         return []
     return ["--unshare-user", "--uid", "0", "--gid", "0"]
@@ -130,7 +163,11 @@ def _prepare_bwrap(
     timeout: int | None,
     container_tmp: Path,
 ) -> list[str] | None:
-    base_flags = _probe_bwrap_userns(bwrap, timeout=timeout, logger=logger)
+    try:
+        base_flags = _probe_bwrap_userns(bwrap, timeout=timeout, logger=logger)
+    except BubblewrapUnavailable as exc:
+        logger(str(exc))
+        return None
     base_flags.extend(["--unshare-pid", "--unshare-ipc", "--unshare-uts"])
     proc_flags = _probe_bwrap_proc(bwrap, base_flags, root, timeout=timeout)
     probe_args = [
