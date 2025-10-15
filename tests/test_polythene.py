@@ -106,9 +106,7 @@ class _DummyBackend:
         container_tmp: Path,
     ) -> tuple[str, int] | None:
         self.calls.append((root, inner_cmd, timeout))
-        if self.exit_code is None:
-            return None
-        return (self.name, self.exit_code)
+        return None if self.exit_code is None else (self.name, self.exit_code)
 
 
 def test_normalise_command_args_flattens_single_sequence() -> None:

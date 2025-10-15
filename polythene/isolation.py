@@ -286,6 +286,7 @@ def cmd_exec(
                 log(f"{source} unavailable: falling back to {next_backend.name}")
                 current_isolation = next_backend.name
             else:
+                log(f"{backend.name} unavailable and no further backends remain")
                 current_isolation = backend.name
             continue
 

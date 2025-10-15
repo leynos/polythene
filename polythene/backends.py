@@ -39,6 +39,25 @@ _BWRAP_SYSCTL_DISABLED = (
 _BWRAP_PERMISSION_DENIED = "unprivileged user namespaces disabled"
 
 
+def _is_bwrap_perm_error(exc: Exception) -> bool:
+    """Return ``True`` when ``exc`` indicates user namespace permissions."""
+    if isinstance(exc, ProcessExecutionError):
+        stderr = exc.stderr
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="ignore")
+        else:
+            stderr = stderr or ""
+        errno_value = getattr(exc, "errno", None)
+        if "Permission denied" in stderr:
+            return True
+        return "Permission denied" in str(exc) or errno_value == errno.EPERM
+
+    if isinstance(exc, OSError):
+        return exc.errno == errno.EPERM
+
+    return False
+
+
 @dc.dataclass(slots=True, frozen=True)
 class Backend:
     """Descriptor for an execution backend."""
@@ -61,14 +80,21 @@ class Backend:
         """Probe and run the backend, returning the chosen name and exit status."""
         try:
             tool = get_command(self.binary)
-        except SystemExit:
+        except SystemExit as exc:
+            logger(f"{self.name} unavailable: {exc}")
             return None
 
         if self.ensure_dirs:
             ensure_runtime_paths(root)
 
-        args = self.prepare(tool, root, inner_cmd, logger, timeout, container_tmp)
+        try:
+            args = self.prepare(tool, root, inner_cmd, logger, timeout, container_tmp)
+        except BubblewrapUnavailable as exc:
+            logger(str(exc))
+            return None
+
         if args is None:
+            logger(f"{self.name} unavailable during preparation")
             return None
 
         logger(f"Executing via {self.name}")
@@ -117,18 +143,12 @@ def _probe_bwrap_userns(
             fg=True,
             timeout=timeout,
         )
-    except (ProcessExecutionError, SystemExit, OSError) as exc:
-        if isinstance(exc, ProcessExecutionError):
-            stderr = exc.stderr or ""
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode(errors="ignore")
-            errno_value = getattr(exc, "errno", None)
-            if "Permission denied" in str(stderr) or errno_value == errno.EPERM:
-                raise BubblewrapUnavailable(_BWRAP_PERMISSION_DENIED) from exc
-        if isinstance(exc, OSError) and exc.errno == errno.EPERM:
+    except (ProcessExecutionError, OSError) as exc:
+        if _is_bwrap_perm_error(exc):
             raise BubblewrapUnavailable(_BWRAP_PERMISSION_DENIED) from exc
         logger(f"User namespace probe failed: {exc}")
         return []
+
     return ["--unshare-user", "--uid", "0", "--gid", "0"]
 
 
@@ -163,11 +183,7 @@ def _prepare_bwrap(
     timeout: int | None,
     container_tmp: Path,
 ) -> list[str] | None:
-    try:
-        base_flags = _probe_bwrap_userns(bwrap, timeout=timeout, logger=logger)
-    except BubblewrapUnavailable as exc:
-        logger(str(exc))
-        return None
+    base_flags = _probe_bwrap_userns(bwrap, timeout=timeout, logger=logger)
     base_flags.extend(["--unshare-pid", "--unshare-ipc", "--unshare-uts"])
     proc_flags = _probe_bwrap_proc(bwrap, base_flags, root, timeout=timeout)
     probe_args = [

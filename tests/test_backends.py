@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import typing as typ
 
 import pytest
@@ -136,6 +137,22 @@ def test_probe_bwrap_userns_permission_denied(monkeypatch: pytest.MonkeyPatch) -
         )
 
 
+def test_probe_bwrap_userns_oserror_eperm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OS errors reporting ``EPERM`` disable bubblewrap immediately."""
+
+    def fake_run_cmd(_cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
+        raise OSError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
+
+    with pytest.raises(backends.BubblewrapUnavailable, match="unprivileged"):
+        backends._probe_bwrap_userns(
+            typ.cast("BaseCommand", _StubCommand()),
+            timeout=None,
+            logger=lambda _msg: None,
+        )
+
+
 def test_probe_bwrap_userns_respects_sysctl(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -146,6 +163,7 @@ def test_probe_bwrap_userns_respects_sysctl(
 
     def fail_run_cmd(*_args: object, **_kwargs: object) -> int:
         pytest.fail("bubblewrap should not be probed when sysctl=0")
+        raise AssertionError("unreachable")
 
     monkeypatch.setattr(backends, "run_cmd", fail_run_cmd)
 
@@ -157,26 +175,37 @@ def test_probe_bwrap_userns_respects_sysctl(
         )
 
 
-def test_prepare_bwrap_logs_unavailability(
+def test_backend_run_logs_bubblewrap_unavailability(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``_prepare_bwrap`` propagates friendly logging on hard failure."""
+    """``Backend.run`` logs and skips when bubblewrap becomes unavailable."""
     messages: list[str] = []
 
-    def fake_probe(*_args: object, **_kwargs: object) -> list[str]:
+    def fake_prepare(
+        *_args: object, **_kwargs: object
+    ) -> list[str] | None:  # pragma: no cover - replaced in test
         message = "bubblewrap unavailable"
         raise backends.BubblewrapUnavailable(message)
 
-    monkeypatch.setattr(backends, "_probe_bwrap_userns", fake_probe)
-
-    result = backends._prepare_bwrap(
-        typ.cast("BaseCommand", _StubCommand()),
-        tmp_path,
-        "echo hi",
-        messages.append,
-        timeout=None,
-        container_tmp=tmp_path / "tmpfs",
+    backend = backends.Backend(
+        name="bubblewrap",
+        binary="bwrap",
+        prepare=fake_prepare,  # type: ignore[arg-type]
     )
 
-    assert result is None
+    def fake_get_command(binary: str) -> _StubCommand:
+        assert binary == "bwrap"
+        return _StubCommand()
+
+    monkeypatch.setattr(backends, "get_command", fake_get_command)
+
+    outcome = backend.run(
+        tmp_path,
+        "echo hi",
+        timeout=None,
+        logger=messages.append,
+        container_tmp=tmp_path,
+    )
+
+    assert outcome is None
     assert messages == ["bubblewrap unavailable"]
