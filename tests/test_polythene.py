@@ -218,6 +218,10 @@ def test_cmd_exec_logs_bubblewrap_fallback(
     )
 
     assert result.exit_code == 0
+    assert (
+        "Warning: backend.run returned None for backend 'bubblewrap'."
+        " This may indicate an error or an unsupported condition."
+    ) in result.stderr
     assert "bubblewrap unavailable: falling back to proot" in result.stderr
     assert bubblewrap.calls == [(root, "true", None)]
     assert proot.calls == [(root, "true", None)]

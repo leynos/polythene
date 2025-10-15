@@ -280,6 +280,12 @@ def cmd_exec(
         except ProcessExecutionError as exc:
             raise SystemExit(_normalise_retcode(exc.retcode)) from exc
         if outcome is None:
+            warning = (
+                "Warning: backend.run returned None for backend "
+                f"'{backend.name}'. This may indicate an error or an "
+                "unsupported condition."
+            )
+            log(warning)
             next_backend = _next_available_backend(index + 1)
             if next_backend is not None:
                 source = current_isolation or backend.name
