@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import errno
+import os
 import typing as typ
 from pathlib import Path
 
@@ -37,6 +38,16 @@ _BWRAP_SYSCTL_DISABLED = (
     "bubblewrap requires unprivileged user namespaces; falling back to proot"
 )
 _BWRAP_PERMISSION_DENIED = "unprivileged user namespaces disabled"
+
+
+def _is_privileged_user() -> bool:
+    """Return ``True`` when the current process is allowed privileged actions."""
+    # ``geteuid`` is not available on Windows, but Polythene only targets Linux.
+    # Guard in case someone executes the tests elsewhere.
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None:
+        return False
+    return geteuid() == 0
 
 
 def _is_bwrap_perm_error(exc: Exception) -> bool:
@@ -115,15 +126,16 @@ def _probe_bwrap_userns(
     timeout: int | None,
     logger: Logger,
 ) -> list[str]:
-    try:
-        value = _UNPRIVILEGED_USERNS_PATH.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        logger(f"Unable to read /proc/sys/kernel/unprivileged_userns_clone: {exc}")
-    else:
-        if value == "0":
-            raise BubblewrapUnavailable(_BWRAP_SYSCTL_DISABLED)
+    if not _is_privileged_user():
+        try:
+            value = _UNPRIVILEGED_USERNS_PATH.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger(f"Unable to read /proc/sys/kernel/unprivileged_userns_clone: {exc}")
+        else:
+            if value == "0":
+                raise BubblewrapUnavailable(_BWRAP_SYSCTL_DISABLED)
 
     try:
         run_cmd(

@@ -160,6 +160,7 @@ def test_probe_bwrap_userns_respects_sysctl(
     flag = tmp_path / "unprivileged_userns_clone"
     flag.write_text("0", encoding="utf-8")
     monkeypatch.setattr(backends, "_UNPRIVILEGED_USERNS_PATH", flag)
+    monkeypatch.setattr(backends, "_is_privileged_user", lambda: False)
 
     def fail_run_cmd(*_args: object, **_kwargs: object) -> int:
         pytest.fail("bubblewrap should not be probed when sysctl=0")
@@ -173,6 +174,34 @@ def test_probe_bwrap_userns_respects_sysctl(
             timeout=None,
             logger=lambda _msg: None,
         )
+
+
+def test_probe_bwrap_userns_skips_sysctl_for_privileged(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Root users ignore the sysctl and still probe bubblewrap."""
+    flag = tmp_path / "unprivileged_userns_clone"
+    flag.write_text("0", encoding="utf-8")
+    monkeypatch.setattr(backends, "_UNPRIVILEGED_USERNS_PATH", flag)
+    monkeypatch.setattr(backends, "_is_privileged_user", lambda: True)
+
+    stub = _StubCommand()
+    executed: list[tuple[str, ...]] = []
+
+    def fake_run_cmd(cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
+        executed.append(cmd)
+        return 0
+
+    monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
+
+    result = backends._probe_bwrap_userns(
+        typ.cast("BaseCommand", stub),
+        timeout=None,
+        logger=lambda _msg: None,
+    )
+
+    assert result == ["--unshare-user", "--uid", "0", "--gid", "0"]
+    assert stub.calls == executed  # probe executed despite sysctl=0
 
 
 def test_backend_run_logs_bubblewrap_unavailability(
