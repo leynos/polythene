@@ -86,12 +86,12 @@ def test_cmd_pull_retries_existing_uuid(
 class _DummyBackend:
     def __init__(
         self,
-        return_code: int | None,
+        exit_code: int | None,
         *,
         requires_root: bool = False,
         name: str = "dummy",
     ) -> None:
-        self.return_code = return_code
+        self.exit_code = exit_code
         self.requires_root = requires_root
         self.name = name
         self.calls: list[tuple[Path, str, int | None]] = []
@@ -104,9 +104,9 @@ class _DummyBackend:
         timeout: int | None,
         logger: typ.Callable[[str], None],
         container_tmp: Path,
-    ) -> int | None:
+    ) -> tuple[str, int] | None:
         self.calls.append((root, inner_cmd, timeout))
-        return self.return_code
+        return None if self.exit_code is None else (self.name, self.exit_code)
 
 
 def test_normalise_command_args_flattens_single_sequence() -> None:
@@ -187,6 +187,40 @@ def test_cmd_exec_uses_first_available_backend(
     assert result.exit_code == 0
     assert primary.calls == [(root, "echo 'hello world'", 15)]
     assert fallback.calls == []
+
+
+def test_cmd_exec_logs_bubblewrap_fallback(
+    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When bubblewrap is unavailable the CLI logs a friendly fallback."""
+    root = tmp_path / "uuid-bwrap"
+    root.mkdir(parents=True)
+
+    bubblewrap = _DummyBackend(None, name="bubblewrap")
+    proot = _DummyBackend(0, name="proot")
+    monkeypatch.setattr(isolation, "BACKENDS", (bubblewrap, proot))
+    monkeypatch.setattr(isolation, "IS_ROOT", True)
+    monkeypatch.setattr(isolation, "VERBOSE", True)
+
+    result = run_cli(
+        [
+            "exec",
+            "uuid-bwrap",
+            "--store",
+            tmp_path.as_posix(),
+            "--isolation",
+            "bubblewrap",
+            "--",
+            "true",
+        ]
+    )
+
+    assert result.exit_code == 0
+    assert "bubblewrap unavailable: falling back to proot" in result.stderr
+    assert bubblewrap.calls == [(root, "true", None)]
+    assert proot.calls == [(root, "true", None)]
 
 
 def test_cmd_exec_allows_leading_hyphen_arguments(

@@ -257,11 +257,20 @@ def cmd_exec(
         remaining = [backend for backend in BACKENDS if backend is not preferred]
         selected_backends = (preferred, *remaining)
 
-    for backend in selected_backends:
+    def _next_available_backend(start: int) -> Backend | None:
+        for candidate in selected_backends[start:]:
+            if candidate.requires_root and not IS_ROOT:
+                continue
+            return candidate
+        return None
+
+    current_isolation = isolation
+
+    for index, backend in enumerate(selected_backends):
         if backend.requires_root and not IS_ROOT:
             continue
         try:
-            rc = backend.run(
+            outcome = backend.run(
                 root,
                 inner_cmd,
                 timeout=timeout,
@@ -270,6 +279,18 @@ def cmd_exec(
             )
         except ProcessExecutionError as exc:
             raise SystemExit(_normalise_retcode(exc.retcode)) from exc
+        if outcome is None:
+            next_backend = _next_available_backend(index + 1)
+            if next_backend is not None:
+                source = current_isolation or backend.name
+                log(f"{source} unavailable: falling back to {next_backend.name}")
+                current_isolation = next_backend.name
+            else:
+                log(f"{backend.name} unavailable and no further backends remain")
+            continue
+
+        name, rc = outcome
+        current_isolation = name
         if rc is not None:
             if rc == 0:
                 return

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import errno
+import os
 import typing as typ
 from pathlib import Path
 
@@ -14,6 +16,7 @@ from .script_utils import ensure_directory, get_command
 
 __all__ = [
     "Backend",
+    "BubblewrapUnavailable",
     "create_backends",
     "ensure_runtime_paths",
 ]
@@ -24,6 +27,46 @@ Logger = typ.Callable[[str], None]
 PrepareFn = typ.Callable[
     [BaseCommand, Path, str, Logger, int | None, Path], list[str] | None
 ]
+
+
+class BubblewrapUnavailable(RuntimeError):  # noqa: N818 - aligns with CLI wording
+    """Raised when the host kernel forbids bubblewrap user namespaces."""
+
+
+_UNPRIVILEGED_USERNS_PATH = Path("/proc/sys/kernel/unprivileged_userns_clone")
+_BWRAP_SYSCTL_DISABLED = (
+    "bubblewrap requires unprivileged user namespaces; falling back to proot"
+)
+_BWRAP_PERMISSION_DENIED = "unprivileged user namespaces disabled"
+
+
+def _is_privileged_user() -> bool:
+    """Return ``True`` when the current process is allowed privileged actions."""
+    # ``geteuid`` is not available on Windows, but Polythene only targets Linux.
+    # Guard in case someone executes the tests elsewhere.
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None:
+        return False
+    return geteuid() == 0
+
+
+def _is_bwrap_perm_error(exc: Exception) -> bool:
+    """Return ``True`` when ``exc`` indicates user namespace permissions."""
+    if isinstance(exc, ProcessExecutionError):
+        stderr = exc.stderr
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="ignore")
+        else:
+            stderr = stderr or ""
+        errno_value = getattr(exc, "errno", None)
+        if "Permission denied" in stderr:
+            return True
+        return "Permission denied" in str(exc) or errno_value == errno.EPERM
+
+    if isinstance(exc, OSError):
+        return exc.errno == errno.EPERM
+
+    return False
 
 
 @dc.dataclass(slots=True, frozen=True)
@@ -44,23 +87,31 @@ class Backend:
         timeout: int | None,
         logger: Logger,
         container_tmp: Path,
-    ) -> int | None:
-        """Probe and run the backend, returning the exit status."""
+    ) -> tuple[str, int] | None:
+        """Probe and run the backend, returning the chosen name and exit status."""
         try:
             tool = get_command(self.binary)
-        except SystemExit:
+        except SystemExit as exc:
+            logger(f"{self.name} unavailable: {exc}")
             return None
 
         if self.ensure_dirs:
             ensure_runtime_paths(root)
 
-        args = self.prepare(tool, root, inner_cmd, logger, timeout, container_tmp)
+        try:
+            args = self.prepare(tool, root, inner_cmd, logger, timeout, container_tmp)
+        except BubblewrapUnavailable as exc:
+            logger(str(exc))
+            return None
+
         if args is None:
+            logger(f"{self.name} unavailable during preparation")
             return None
 
         logger(f"Executing via {self.name}")
         result = run_cmd(tool[tuple(args)], fg=True, timeout=timeout)
-        return int(result) if result is not None else 0
+        exit_code = int(result) if result is not None else 0
+        return (self.name, exit_code)
 
 
 def ensure_runtime_paths(root: Path) -> None:
@@ -75,6 +126,17 @@ def _probe_bwrap_userns(
     timeout: int | None,
     logger: Logger,
 ) -> list[str]:
+    if not _is_privileged_user():
+        try:
+            value = _UNPRIVILEGED_USERNS_PATH.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger(f"Unable to read /proc/sys/kernel/unprivileged_userns_clone: {exc}")
+        else:
+            if value == "0":
+                raise BubblewrapUnavailable(_BWRAP_SYSCTL_DISABLED)
+
     try:
         run_cmd(
             bwrap[
@@ -93,9 +155,12 @@ def _probe_bwrap_userns(
             fg=True,
             timeout=timeout,
         )
-    except (ProcessExecutionError, SystemExit, OSError) as exc:
+    except (ProcessExecutionError, OSError) as exc:
+        if _is_bwrap_perm_error(exc):
+            raise BubblewrapUnavailable(_BWRAP_PERMISSION_DENIED) from exc
         logger(f"User namespace probe failed: {exc}")
         return []
+
     return ["--unshare-user", "--uid", "0", "--gid", "0"]
 
 
