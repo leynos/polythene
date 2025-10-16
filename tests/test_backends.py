@@ -162,9 +162,8 @@ def test_probe_bwrap_userns_respects_sysctl(
     monkeypatch.setattr(backends, "_UNPRIVILEGED_USERNS_PATH", flag)
     monkeypatch.setattr(backends, "_is_privileged_user", lambda: False)
 
-    def fail_run_cmd(*_args: object, **_kwargs: object) -> typ.NoReturn:
+    def fail_run_cmd(*_args: object, **_kwargs: object) -> None:
         pytest.fail("bubblewrap should not be probed when sysctl=0")
-        raise AssertionError("unreachable")  # Keep Pyright happy
 
     monkeypatch.setattr(backends, "run_cmd", fail_run_cmd)
 
@@ -174,6 +173,68 @@ def test_probe_bwrap_userns_respects_sysctl(
             timeout=None,
             logger=lambda _msg: None,
         )
+
+
+def test_probe_bwrap_userns_sysctl_missing(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing sysctl files should not prevent probing."""
+    missing_path = tmp_path / "nonexistent"
+    monkeypatch.setattr(backends, "_UNPRIVILEGED_USERNS_PATH", missing_path)
+    monkeypatch.setattr(backends, "_is_privileged_user", lambda: False)
+
+    stub = _StubCommand()
+    executed: list[tuple[str, ...]] = []
+
+    def fake_run_cmd(cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
+        executed.append(cmd)
+        return 0
+
+    monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
+
+    result = backends._probe_bwrap_userns(
+        typ.cast("BaseCommand", stub),
+        timeout=None,
+        logger=lambda _msg: None,
+    )
+
+    assert result == ["--unshare-user", "--uid", "0", "--gid", "0"]
+    assert executed == stub.calls
+
+
+def test_probe_bwrap_userns_sysctl_read_error(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unexpected sysctl read errors should be logged but probing continues."""
+    bad_path = tmp_path / "userns_dir"
+    bad_path.mkdir()
+    monkeypatch.setattr(backends, "_UNPRIVILEGED_USERNS_PATH", bad_path)
+    monkeypatch.setattr(backends, "_is_privileged_user", lambda: False)
+
+    stub = _StubCommand()
+    executed: list[tuple[str, ...]] = []
+    logs: list[str] = []
+
+    def fake_run_cmd(cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
+        executed.append(cmd)
+        return 0
+
+    monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
+
+    result = backends._probe_bwrap_userns(
+        typ.cast("BaseCommand", stub),
+        timeout=None,
+        logger=logs.append,
+    )
+
+    assert result == ["--unshare-user", "--uid", "0", "--gid", "0"]
+    assert executed == stub.calls
+    assert logs == [
+        (
+            "Unable to read /proc/sys/kernel/unprivileged_userns_clone: "
+            f"[Errno 21] Is a directory: '{bad_path}'"
+        )
+    ]
 
 
 def test_probe_bwrap_userns_skips_sysctl_for_privileged(
