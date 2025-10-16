@@ -162,8 +162,9 @@ def test_probe_bwrap_userns_respects_sysctl(
     monkeypatch.setattr(backends, "_UNPRIVILEGED_USERNS_PATH", flag)
     monkeypatch.setattr(backends, "_is_privileged_user", lambda: False)
 
-    def fail_run_cmd(*_args: object, **_kwargs: object) -> None:
+    def fail_run_cmd(*_args: object, **_kwargs: object) -> typ.NoReturn:
         pytest.fail("bubblewrap should not be probed when sysctl=0")
+        raise AssertionError("unreachable")  # appease Pyright's flow analysis
 
     monkeypatch.setattr(backends, "run_cmd", fail_run_cmd)
 
