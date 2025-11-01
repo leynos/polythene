@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import pathlib
 import typing as typ
 
 import pytest
@@ -29,6 +30,20 @@ class _StubCommand:
         return args
 
 
+def _make_context(
+    *,
+    container_tmp: pathlib.Path,
+    logger: typ.Callable[[str], None] = lambda _msg: None,
+    timeout: int | None = None,
+) -> backends.BackendContext:
+    """Return a backend context tailored for the current test."""
+    return backends.BackendContext(
+        logger=logger,
+        timeout=timeout,
+        container_tmp=container_tmp,
+    )
+
+
 def test_prepare_proot_avoids_login_shell(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -48,13 +63,13 @@ def test_prepare_proot_avoids_login_shell(
     monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
 
     inner_cmd = "test -x /usr/bin/rust-toy-app"
+    context = _make_context(container_tmp=tmp_path, logger=lambda _msg: None)
+
     result = backends._prepare_proot(
         typ.cast("BaseCommand", stub),
         tmp_path,
         inner_cmd,
-        lambda _msg: None,
-        timeout=None,
-        _container_tmp=tmp_path,
+        context,
     )
 
     assert stub.calls[0] == (
@@ -104,12 +119,12 @@ def test_proot_backend_run_uses_non_login_shell(
     monkeypatch.setattr(backends, "get_command", fake_get_command)
     monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
 
+    context = _make_context(container_tmp=tmp_path, logger=lambda _msg: None)
+
     outcome = backend.run(
         tmp_path,
         "echo hi",
-        timeout=None,
-        logger=lambda _msg: None,
-        container_tmp=tmp_path,
+        context=context,
     )
 
     assert outcome == (backend.name, 0)
@@ -121,7 +136,9 @@ def test_proot_backend_run_uses_non_login_shell(
     assert executed == stub.calls
 
 
-def test_probe_bwrap_userns_permission_denied(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_bwrap_userns_permission_denied(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Permission denied during probing should disable bubblewrap early."""
 
     def fake_run_cmd(_cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
@@ -132,12 +149,13 @@ def test_probe_bwrap_userns_permission_denied(monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(backends.BubblewrapUnavailable, match="unprivileged"):
         backends._probe_bwrap_userns(
             typ.cast("BaseCommand", _StubCommand()),
-            timeout=None,
-            logger=lambda _msg: None,
+            _make_context(container_tmp=tmp_path, logger=lambda _msg: None),
         )
 
 
-def test_probe_bwrap_userns_oserror_eperm(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_bwrap_userns_oserror_eperm(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """OS errors reporting ``EPERM`` disable bubblewrap immediately."""
 
     def fake_run_cmd(_cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
@@ -148,8 +166,7 @@ def test_probe_bwrap_userns_oserror_eperm(monkeypatch: pytest.MonkeyPatch) -> No
     with pytest.raises(backends.BubblewrapUnavailable, match="unprivileged"):
         backends._probe_bwrap_userns(
             typ.cast("BaseCommand", _StubCommand()),
-            timeout=None,
-            logger=lambda _msg: None,
+            _make_context(container_tmp=tmp_path, logger=lambda _msg: None),
         )
 
 
@@ -171,8 +188,7 @@ def test_probe_bwrap_userns_respects_sysctl(
     with pytest.raises(backends.BubblewrapUnavailable, match="requires unprivileged"):
         backends._probe_bwrap_userns(
             typ.cast("BaseCommand", _StubCommand()),
-            timeout=None,
-            logger=lambda _msg: None,
+            _make_context(container_tmp=tmp_path, logger=lambda _msg: None),
         )
 
 
@@ -195,8 +211,7 @@ def test_probe_bwrap_userns_sysctl_missing(
 
     result = backends._probe_bwrap_userns(
         typ.cast("BaseCommand", stub),
-        timeout=None,
-        logger=lambda _msg: None,
+        _make_context(container_tmp=tmp_path, logger=lambda _msg: None),
     )
 
     assert result == ["--unshare-user", "--uid", "0", "--gid", "0"]
@@ -224,8 +239,7 @@ def test_probe_bwrap_userns_sysctl_read_error(
 
     result = backends._probe_bwrap_userns(
         typ.cast("BaseCommand", stub),
-        timeout=None,
-        logger=logs.append,
+        _make_context(container_tmp=tmp_path, logger=logs.append),
     )
 
     assert result == ["--unshare-user", "--uid", "0", "--gid", "0"]
@@ -258,8 +272,7 @@ def test_probe_bwrap_userns_skips_sysctl_for_privileged(
 
     result = backends._probe_bwrap_userns(
         typ.cast("BaseCommand", stub),
-        timeout=None,
-        logger=lambda _msg: None,
+        _make_context(container_tmp=tmp_path, logger=lambda _msg: None),
     )
 
     assert result == ["--unshare-user", "--uid", "0", "--gid", "0"]
@@ -290,12 +303,12 @@ def test_backend_run_logs_bubblewrap_unavailability(
 
     monkeypatch.setattr(backends, "get_command", fake_get_command)
 
+    context = _make_context(container_tmp=tmp_path, logger=messages.append)
+
     outcome = backend.run(
         tmp_path,
         "echo hi",
-        timeout=None,
-        logger=messages.append,
-        container_tmp=tmp_path,
+        context=context,
     )
 
     assert outcome is None

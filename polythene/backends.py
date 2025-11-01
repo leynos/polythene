@@ -16,6 +16,7 @@ from .script_utils import ensure_directory, get_command
 
 __all__ = [
     "Backend",
+    "BackendContext",
     "BubblewrapUnavailable",
     "create_backends",
     "ensure_runtime_paths",
@@ -24,9 +25,17 @@ __all__ = [
 
 Logger = typ.Callable[[str], None]
 
-PrepareFn = typ.Callable[
-    [BaseCommand, Path, str, Logger, int | None, Path], list[str] | None
-]
+
+@dc.dataclass(slots=True, frozen=True)
+class BackendContext:
+    """Configuration shared between backend probes and execution."""
+
+    logger: Logger
+    timeout: int | None
+    container_tmp: Path
+
+
+PrepareFn = typ.Callable[[BaseCommand, Path, str, BackendContext], list[str] | None]
 
 
 class BubblewrapUnavailable(RuntimeError):  # noqa: N818 - aligns with CLI wording
@@ -84,11 +93,11 @@ class Backend:
         root: Path,
         inner_cmd: str,
         *,
-        timeout: int | None,
-        logger: Logger,
-        container_tmp: Path,
+        context: BackendContext,
     ) -> tuple[str, int] | None:
         """Probe and run the backend, returning the chosen name and exit status."""
+        logger = context.logger
+        timeout = context.timeout
         try:
             tool = get_command(self.binary)
         except SystemExit as exc:
@@ -99,7 +108,7 @@ class Backend:
             ensure_runtime_paths(root)
 
         try:
-            args = self.prepare(tool, root, inner_cmd, logger, timeout, container_tmp)
+            args = self.prepare(tool, root, inner_cmd, context)
         except BubblewrapUnavailable as exc:
             logger(str(exc))
             return None
@@ -120,12 +129,9 @@ def ensure_runtime_paths(root: Path) -> None:
         ensure_directory(root / sub)
 
 
-def _probe_bwrap_userns(
-    bwrap: BaseCommand,
-    *,
-    timeout: int | None,
-    logger: Logger,
-) -> list[str]:
+def _probe_bwrap_userns(bwrap: BaseCommand, context: BackendContext) -> list[str]:
+    logger = context.logger
+    timeout = context.timeout
     if not _is_privileged_user():
         try:
             value = _UNPRIVILEGED_USERNS_PATH.read_text(encoding="utf-8").strip()
@@ -168,9 +174,9 @@ def _probe_bwrap_proc(
     bwrap: BaseCommand,
     base_flags: list[str],
     root: Path,
-    *,
-    timeout: int | None,
+    context: BackendContext,
 ) -> list[str]:
+    timeout = context.timeout
     probe = [
         *base_flags,
         "--bind",
@@ -191,13 +197,13 @@ def _prepare_bwrap(
     bwrap: BaseCommand,
     root: Path,
     inner_cmd: str,
-    logger: Logger,
-    timeout: int | None,
-    container_tmp: Path,
+    context: BackendContext,
 ) -> list[str] | None:
-    base_flags = _probe_bwrap_userns(bwrap, timeout=timeout, logger=logger)
+    timeout = context.timeout
+    container_tmp = context.container_tmp
+    base_flags = _probe_bwrap_userns(bwrap, context)
     base_flags.extend(["--unshare-pid", "--unshare-ipc", "--unshare-uts"])
-    proc_flags = _probe_bwrap_proc(bwrap, base_flags, root, timeout=timeout)
+    proc_flags = _probe_bwrap_proc(bwrap, base_flags, root, context)
     probe_args = [
         *base_flags,
         "--bind",
@@ -243,10 +249,9 @@ def _prepare_proot(
     proot: BaseCommand,
     root: Path,
     inner_cmd: str,
-    _logger: Logger,
-    timeout: int | None,
-    _container_tmp: Path,
+    context: BackendContext,
 ) -> list[str] | None:
+    timeout = context.timeout
     probe_args = ["-R", str(root), "-0", "/bin/sh", "-c", "true"]
     try:
         run_cmd(proot[tuple(probe_args)], fg=True, timeout=timeout)
@@ -259,10 +264,9 @@ def _prepare_chroot(
     chroot: BaseCommand,
     root: Path,
     inner_cmd: str,
-    _logger: Logger,
-    timeout: int | None,
-    _container_tmp: Path,
+    context: BackendContext,
 ) -> list[str] | None:
+    timeout = context.timeout
     probe_args = [str(root), "/bin/sh", "-c", "true"]
     try:
         run_cmd(chroot[tuple(probe_args)], fg=True, timeout=timeout)

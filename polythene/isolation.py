@@ -17,7 +17,7 @@ from cyclopts import App, Parameter
 from plumbum.commands.processes import ProcessExecutionError
 from uuid6 import uuid7
 
-from .backends import Backend, create_backends, ensure_runtime_paths
+from .backends import Backend, BackendContext, create_backends, ensure_runtime_paths
 from .script_utils import ensure_directory, get_command, run_cmd
 
 # -------------------- Configuration --------------------
@@ -266,6 +266,12 @@ def cmd_exec(
 
     current_isolation = isolation
 
+    context = BackendContext(
+        logger=log,
+        timeout=timeout,
+        container_tmp=CONTAINER_TMP,
+    )
+
     for index, backend in enumerate(selected_backends):
         if backend.requires_root and not IS_ROOT:
             continue
@@ -273,9 +279,7 @@ def cmd_exec(
             outcome = backend.run(
                 root,
                 inner_cmd,
-                timeout=timeout,
-                logger=log,
-                container_tmp=CONTAINER_TMP,
+                context=context,
             )
         except ProcessExecutionError as exc:
             raise SystemExit(_normalise_retcode(exc.retcode)) from exc

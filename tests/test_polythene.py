@@ -9,6 +9,7 @@ import pytest
 
 import polythene
 import polythene.isolation as isolation
+from polythene import backends
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -101,11 +102,9 @@ class _DummyBackend:
         root: Path,
         inner_cmd: str,
         *,
-        timeout: int | None,
-        logger: typ.Callable[[str], None],
-        container_tmp: Path,
+        context: backends.BackendContext,
     ) -> tuple[str, int] | None:
-        self.calls.append((root, inner_cmd, timeout))
+        self.calls.append((root, inner_cmd, context.timeout))
         return None if self.exit_code is None else (self.name, self.exit_code)
 
 
