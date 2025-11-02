@@ -12,8 +12,6 @@ from plumbum.commands.processes import ProcessExecutionError
 from polythene import backends
 
 if typ.TYPE_CHECKING:
-    import pathlib
-
     from plumbum.commands.base import BaseCommand
 else:  # pragma: no cover - runtime sentinel for typing-only import
     BaseCommand = typ.Any  # type: ignore[assignment]
@@ -37,6 +35,7 @@ def _make_context(
     timeout: int | None = None,
 ) -> backends.BackendContext:
     """Return a backend context tailored for the current test."""
+    container_tmp = pathlib.Path(container_tmp)
     return backends.BackendContext(
         logger=logger,
         timeout=timeout,
