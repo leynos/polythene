@@ -35,7 +35,8 @@ class BackendContext:
     container_tmp: Path
 
 
-PrepareFn = typ.Callable[[BaseCommand, Path, str, BackendContext], list[str] | None]
+PrepareFn = typ.Callable[[BaseCommand, Path, str], list[str] | None]
+PrepareFactory = typ.Callable[[BackendContext], PrepareFn]
 
 
 class BubblewrapUnavailable(RuntimeError):  # noqa: N818 - aligns with CLI wording
@@ -84,7 +85,7 @@ class Backend:
 
     name: str
     binary: str
-    prepare: PrepareFn
+    prepare_factory: PrepareFactory
     ensure_dirs: bool = True
     requires_root: bool = False
 
@@ -108,7 +109,8 @@ class Backend:
             ensure_runtime_paths(root)
 
         try:
-            args = self.prepare(tool, root, inner_cmd, context)
+            prepare = self.prepare_factory(context)
+            args = prepare(tool, root, inner_cmd)
         except BubblewrapUnavailable as exc:
             logger(str(exc))
             return None
@@ -174,9 +176,9 @@ def _probe_bwrap_proc(
     bwrap: BaseCommand,
     base_flags: list[str],
     root: Path,
-    context: BackendContext,
+    *,
+    timeout: int | None,
 ) -> list[str]:
-    timeout = context.timeout
     probe = [
         *base_flags,
         "--bind",
@@ -193,91 +195,105 @@ def _probe_bwrap_proc(
     return ["--proc", "/proc"]
 
 
-def _prepare_bwrap(
-    bwrap: BaseCommand,
-    root: Path,
-    inner_cmd: str,
-    context: BackendContext,
-) -> list[str] | None:
+def make_prepare_bwrap(context: BackendContext) -> PrepareFn:
     timeout = context.timeout
     container_tmp = context.container_tmp
-    base_flags = _probe_bwrap_userns(bwrap, context)
-    base_flags.extend(["--unshare-pid", "--unshare-ipc", "--unshare-uts"])
-    proc_flags = _probe_bwrap_proc(bwrap, base_flags, root, context)
-    probe_args = [
-        *base_flags,
-        "--bind",
-        str(root),
-        "/",
-        "--dev-bind",
-        "/dev",
-        "/dev",
-        *proc_flags,
-        "--tmpfs",
-        str(container_tmp),
-        "--chdir",
-        "/",
-        "/bin/sh",
-        "-c",
-        "true",
-    ]
-    try:
-        run_cmd(bwrap[tuple(probe_args)], fg=True, timeout=timeout)
-    except (ProcessExecutionError, SystemExit, OSError):
-        return None
 
-    return [
-        *base_flags,
-        "--bind",
-        str(root),
-        "/",
-        "--dev-bind",
-        "/dev",
-        "/dev",
-        *proc_flags,
-        "--tmpfs",
-        str(container_tmp),
-        "--chdir",
-        "/",
-        "/bin/sh",
-        "-c",
-        inner_cmd,
-    ]
+    def _prepare_bwrap(
+        bwrap: BaseCommand,
+        root: Path,
+        inner_cmd: str,
+    ) -> list[str] | None:
+        base_flags = _probe_bwrap_userns(bwrap, context)
+        base_flags.extend(["--unshare-pid", "--unshare-ipc", "--unshare-uts"])
+        proc_flags = _probe_bwrap_proc(
+            bwrap,
+            base_flags,
+            root,
+            timeout=timeout,
+        )
+        probe_args = [
+            *base_flags,
+            "--bind",
+            str(root),
+            "/",
+            "--dev-bind",
+            "/dev",
+            "/dev",
+            *proc_flags,
+            "--tmpfs",
+            str(container_tmp),
+            "--chdir",
+            "/",
+            "/bin/sh",
+            "-c",
+            "true",
+        ]
+        try:
+            run_cmd(bwrap[tuple(probe_args)], fg=True, timeout=timeout)
+        except (ProcessExecutionError, SystemExit, OSError):
+            return None
+
+        return [
+            *base_flags,
+            "--bind",
+            str(root),
+            "/",
+            "--dev-bind",
+            "/dev",
+            "/dev",
+            *proc_flags,
+            "--tmpfs",
+            str(container_tmp),
+            "--chdir",
+            "/",
+            "/bin/sh",
+            "-c",
+            inner_cmd,
+        ]
+
+    return _prepare_bwrap
 
 
-def _prepare_proot(
-    proot: BaseCommand,
-    root: Path,
-    inner_cmd: str,
-    context: BackendContext,
-) -> list[str] | None:
+def make_prepare_proot(context: BackendContext) -> PrepareFn:
     timeout = context.timeout
-    probe_args = ["-R", str(root), "-0", "/bin/sh", "-c", "true"]
-    try:
-        run_cmd(proot[tuple(probe_args)], fg=True, timeout=timeout)
-    except (ProcessExecutionError, SystemExit, OSError):
-        return None
-    return ["-R", str(root), "-0", "/bin/sh", "-c", inner_cmd]
+
+    def _prepare_proot(
+        proot: BaseCommand,
+        root: Path,
+        inner_cmd: str,
+    ) -> list[str] | None:
+        probe_args = ["-R", str(root), "-0", "/bin/sh", "-c", "true"]
+        try:
+            run_cmd(proot[tuple(probe_args)], fg=True, timeout=timeout)
+        except (ProcessExecutionError, SystemExit, OSError):
+            return None
+        return ["-R", str(root), "-0", "/bin/sh", "-c", inner_cmd]
+
+    return _prepare_proot
 
 
-def _prepare_chroot(
-    chroot: BaseCommand,
-    root: Path,
-    inner_cmd: str,
-    context: BackendContext,
-) -> list[str] | None:
+def make_prepare_chroot(context: BackendContext) -> PrepareFn:
     timeout = context.timeout
-    probe_args = [str(root), "/bin/sh", "-c", "true"]
-    try:
-        run_cmd(chroot[tuple(probe_args)], fg=True, timeout=timeout)
-    except (ProcessExecutionError, SystemExit, OSError):
-        return None
-    return [
-        str(root),
-        "/bin/sh",
-        "-lc",
-        f"export PATH=/bin:/sbin:/usr/bin:/usr/sbin; {inner_cmd}",
-    ]
+
+    def _prepare_chroot(
+        chroot: BaseCommand,
+        root: Path,
+        inner_cmd: str,
+    ) -> list[str] | None:
+        probe_args = [str(root), "/bin/sh", "-c", "true"]
+        try:
+            run_cmd(chroot[tuple(probe_args)], fg=True, timeout=timeout)
+        except (ProcessExecutionError, SystemExit, OSError):
+            return None
+        return [
+            str(root),
+            "/bin/sh",
+            "-lc",
+            f"export PATH=/bin:/sbin:/usr/bin:/usr/sbin; {inner_cmd}",
+        ]
+
+    return _prepare_chroot
 
 
 def create_backends() -> tuple[Backend, ...]:
@@ -286,17 +302,17 @@ def create_backends() -> tuple[Backend, ...]:
         Backend(
             name="bubblewrap",
             binary="bwrap",
-            prepare=_prepare_bwrap,
+            prepare_factory=make_prepare_bwrap,
         ),
         Backend(
             name="proot",
             binary="proot",
-            prepare=_prepare_proot,
+            prepare_factory=make_prepare_proot,
         ),
         Backend(
             name="chroot",
             binary="chroot",
-            prepare=_prepare_chroot,
+            prepare_factory=make_prepare_chroot,
             ensure_dirs=False,
             requires_root=True,
         ),

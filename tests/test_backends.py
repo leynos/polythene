@@ -47,7 +47,7 @@ def _make_context(
 def test_prepare_proot_avoids_login_shell(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``_prepare_proot`` should not request a login shell.
+    """``make_prepare_proot`` should not request a login shell.
 
     Login shells source profile scripts, which can mutate environment state in
     unexpected ways.  The probe command already uses ``-c`` so the execution
@@ -65,11 +65,11 @@ def test_prepare_proot_avoids_login_shell(
     inner_cmd = "test -x /usr/bin/rust-toy-app"
     context = _make_context(container_tmp=tmp_path, logger=lambda _msg: None)
 
-    result = backends._prepare_proot(
+    prepare = backends.make_prepare_proot(context)
+    result = prepare(
         typ.cast("BaseCommand", stub),
         tmp_path,
         inner_cmd,
-        context,
     )
 
     assert stub.calls[0] == (
@@ -98,6 +98,51 @@ def test_prepare_proot_avoids_login_shell(
         "-c",
         inner_cmd,
     ]
+
+
+def test_make_prepare_bwrap_binds_context(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``make_prepare_bwrap`` captures timeout and tmp paths from context."""
+    base_flags = ["--unshare-user"]
+    proc_flags = ["--proc", "/proc"]
+    context = _make_context(
+        container_tmp=tmp_path / "container-tmp",
+        timeout=37,
+        logger=lambda _msg: None,
+    )
+    probe_calls: list[tuple[tuple[str, ...], int | None]] = []
+
+    monkeypatch.setattr(
+        backends, "_probe_bwrap_userns", lambda *_args: base_flags.copy()
+    )
+    monkeypatch.setattr(
+        backends,
+        "_probe_bwrap_proc",
+        lambda *_args, **_kwargs: proc_flags.copy(),
+    )
+
+    def fake_run_cmd(
+        cmd: tuple[str, ...], *, fg: bool, timeout: int | None
+    ) -> int:  # pragma: no cover - instrumented below
+        assert fg is True
+        probe_calls.append((cmd, timeout))
+        return 0
+
+    monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
+
+    prepare = backends.make_prepare_bwrap(context)
+    stub = _StubCommand()
+
+    result = prepare(typ.cast("BaseCommand", stub), tmp_path, "echo hi")
+
+    assert len(stub.calls) == 1
+    probe_cmd, timeout = probe_calls[0]
+    assert timeout == 37
+    assert "--tmpfs" in probe_cmd
+    idx = probe_cmd.index("--tmpfs")
+    assert probe_cmd[idx + 1] == str(context.container_tmp)
+    assert result[-2:] == ["-c", "echo hi"]
 
 
 def test_proot_backend_run_uses_non_login_shell(
@@ -134,6 +179,34 @@ def test_proot_backend_run_uses_non_login_shell(
     assert exec_call[-2] == "-c"
     assert exec_call[-1] == "echo hi"
     assert executed == stub.calls
+
+
+def test_probe_bwrap_userns_uses_context_timeout(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_probe_bwrap_userns`` passes the context timeout to ``run_cmd``."""
+    stub = _StubCommand()
+    timeouts: list[int | None] = []
+
+    def fake_run_cmd(cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
+        assert cmd[-1] == "true"
+        timeouts.append(timeout)
+        return 0
+
+    monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
+    monkeypatch.setattr(backends, "_is_privileged_user", lambda: True)
+
+    context = _make_context(
+        container_tmp=tmp_path, logger=lambda _msg: None, timeout=99
+    )
+
+    result = backends._probe_bwrap_userns(
+        typ.cast("BaseCommand", stub),
+        context,
+    )
+
+    assert result == ["--unshare-user", "--uid", "0", "--gid", "0"]
+    assert timeouts == [99]
 
 
 def test_probe_bwrap_userns_permission_denied(
@@ -286,7 +359,9 @@ def test_backend_run_logs_bubblewrap_unavailability(
     messages: list[str] = []
 
     def fake_prepare(
-        *_args: object, **_kwargs: object
+        _tool: object,
+        _root: object,
+        _inner_cmd: object,
     ) -> list[str] | None:  # pragma: no cover - replaced in test
         message = "bubblewrap unavailable"
         raise backends.BubblewrapUnavailable(message)
@@ -294,7 +369,7 @@ def test_backend_run_logs_bubblewrap_unavailability(
     backend = backends.Backend(
         name="bubblewrap",
         binary="bwrap",
-        prepare=fake_prepare,  # type: ignore[arg-type]
+        prepare_factory=lambda _context: fake_prepare,
     )
 
     def fake_get_command(binary: str) -> _StubCommand:
