@@ -110,7 +110,9 @@ class _DummyBackend:
 
 def test_normalise_command_args_flattens_single_sequence() -> None:
     """Internal helpers flatten nested command sequences."""
-    tokens = isolation._normalise_command_args((["echo", "hello"],))
+    tokens = isolation._normalise_command_args(
+        typ.cast("tuple[str, ...]", (["echo", "hello"],))
+    )
 
     assert tokens == ["echo", "hello"]
 
@@ -118,7 +120,7 @@ def test_normalise_command_args_flattens_single_sequence() -> None:
 def test_normalise_command_args_rejects_non_strings() -> None:
     """Non-string command tokens raise a descriptive ``TypeError``."""
     with pytest.raises(TypeError, match="Command tokens must be strings"):
-        isolation._normalise_command_args(((42,),))
+        isolation._normalise_command_args(typ.cast("tuple[str, ...]", ((42,),)))
 
 
 def test_cmd_exec_accepts_list_command(
@@ -133,7 +135,9 @@ def test_cmd_exec_accepts_list_command(
     monkeypatch.setattr(isolation, "BACKENDS", (backend,))
     monkeypatch.setattr(isolation, "IS_ROOT", True)
 
-    isolation.cmd_exec("uuid-list", ["echo", "hello world"], store=tmp_path)
+    isolation.cmd_exec(
+        "uuid-list", typ.cast("str", ["echo", "hello world"]), store=tmp_path
+    )
 
     assert backend.calls == [(root, "echo 'hello world'", None)]
 

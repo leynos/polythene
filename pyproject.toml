@@ -45,6 +45,7 @@ dev = [
     "ruff",
     "pyright",
     "pytest-timeout",
+    "pyyaml>=6.0.3",
 ]
 
 [tool.setuptools.packages.find]
@@ -135,6 +136,10 @@ typing = "typ"
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "subprocess.run".msg = "Use `plumbum` instead of `subprocess.run`"
 "subprocess.check_call".msg = "Use `plumbum` instead of `subprocess.check_call`"
+
+[tool.mutmut]
+source_paths = ["polythene/"]
+pytest_add_cli_args_test_selection = ["tests/"]
 
 [tool.pytest.ini_options]
 # Ensure asyncio fixtures create a new event loop for each test
