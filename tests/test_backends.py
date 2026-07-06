@@ -141,6 +141,7 @@ def test_make_prepare_bwrap_binds_context(
     assert "--tmpfs" in probe_cmd
     idx = probe_cmd.index("--tmpfs")
     assert probe_cmd[idx + 1] == str(context.container_tmp)
+    assert result is not None
     assert result[-2:] == ["-c", "echo hi"]
 
 
@@ -252,7 +253,10 @@ def test_probe_bwrap_userns_respects_sysctl(
     monkeypatch.setattr(backends, "_is_privileged_user", lambda: False)
 
     def fail_run_cmd(*_args: object, **_kwargs: object) -> typ.NoReturn:
-        pytest.fail("bubblewrap should not be probed when sysctl=0")
+        # ty misreads pytest.fail's decorated signature; the call is correct.
+        pytest.fail(
+            "bubblewrap should not be probed when sysctl=0"  # ty: ignore[invalid-argument-type]
+        )
         raise AssertionError("unreachable")  # appease Pyright's flow analysis
 
     monkeypatch.setattr(backends, "run_cmd", fail_run_cmd)

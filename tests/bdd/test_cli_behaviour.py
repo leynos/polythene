@@ -15,6 +15,14 @@ import polythene.isolation as isolation
 
 Context = dict[str, object]
 
+
+def _store_path(cli_context: Context) -> Path:
+    """Return the store recorded in ``cli_context`` as a ``Path``."""
+    store = cli_context["store"]
+    assert isinstance(store, Path), f"store must be a Path, got {type(store).__name__}"
+    return store
+
+
 scenarios("../features/polythene_cli.feature")
 
 
@@ -45,7 +53,7 @@ def clean_store(tmp_path: Path, cli_context: Context) -> Path:
 @given(parsers.parse('the rootfs "{uuid}" exists'))
 def ensure_rootfs(cli_context: Context, uuid: str) -> None:
     """Create a rootfs directory for ``uuid`` inside the store."""
-    store = Path(cli_context["store"])
+    store = _store_path(cli_context)
     (store / uuid).mkdir(parents=True, exist_ok=True)
 
 
@@ -102,7 +110,7 @@ def run_cli_command(
     cli_context: Context,
 ) -> None:
     """Invoke the CLI fixture with the formatted arguments."""
-    store = Path(cli_context["store"])
+    store = _store_path(cli_context)
     formatted = raw.format(store=store.as_posix())
     args = shlex.split(formatted)
     cli_context["result"] = run_cli(args)
@@ -115,7 +123,7 @@ def run_module_cli_command(
     cli_context: Context,
 ) -> None:
     """Invoke ``python -m polythene`` via the fixture with formatted args."""
-    store = Path(cli_context["store"])
+    store = _store_path(cli_context)
     formatted = raw.format(store=store.as_posix())
     args = shlex.split(formatted)
     cli_context["result"] = run_module_cli(args)
@@ -148,7 +156,7 @@ def assert_stderr_contains(cli_context: Context, value: str) -> None:
 @then(parsers.parse('the rootfs directory "{uuid}" exists'))
 def assert_rootfs_exists(cli_context: Context, uuid: str) -> None:
     """Ensure the exported rootfs folder exists on disk."""
-    store = Path(cli_context["store"])
+    store = _store_path(cli_context)
     assert (store / uuid).is_dir()
 
 

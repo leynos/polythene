@@ -121,7 +121,9 @@ class Backend:
 
         logger(f"Executing via {self.name}")
         result = run_cmd(tool[tuple(args)], fg=True, timeout=timeout)
-        exit_code = int(result) if result is not None else 0
+        exit_code = (
+            int(typ.cast("typ.SupportsInt", result)) if result is not None else 0
+        )
         return (self.name, exit_code)
 
 
