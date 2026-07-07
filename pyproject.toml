@@ -9,7 +9,7 @@ authors = [
     {name = "Polythene Contributors"},
 ]
 dependencies = [
-    "cyclopts>=3.24,<4.0",
+    "cyclopts>=4.19.0,<5.0",
     "plumbum>=1.8,<2.0",
     "uuid6>=2025.0.1",
 ]
