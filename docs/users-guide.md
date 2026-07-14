@@ -112,7 +112,7 @@ commands run unchanged.
 
 ## Environment variables
 
-Polythene recognises the following environment variables:
+Polythene recognizes the following environment variables:
 
 - `POLYTHENE_STORE` – Directory to hold exported root filesystems. Defaults to
   `/var/tmp/polythene`. Command line options take precedence over the variable.

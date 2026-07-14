@@ -88,7 +88,7 @@ def _coerce_command_tokens(
     return tokens
 
 
-def _normalise_command_args(cmd: tuple[CommandToken, ...]) -> list[str]:
+def _normalize_command_args(cmd: tuple[CommandToken, ...]) -> list[str]:
     """Flatten ``cmd`` so public callers can keep passing list arguments."""
     if len(cmd) == 1:
         (sole,) = cmd
@@ -119,7 +119,7 @@ def _error(message: str) -> None:
     print(message, file=sys.stderr)
 
 
-def _normalise_retcode(retcode: int | None) -> int:
+def _normalize_retcode(retcode: int | None) -> int:
     """Return a sensible exit status when a command lacks a numeric code."""
     if not retcode:
         return 1
@@ -157,7 +157,7 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
         run_cmd(podman["pull", image], fg=True, timeout=timeout)
     except ProcessExecutionError as exc:
         _error(f"Failed to pull image {image}: {exc}")
-        raise SystemExit(_normalise_retcode(exc.retcode)) from exc
+        raise SystemExit(_normalize_retcode(exc.retcode)) from exc
 
     ensure_directory(dest, exist_ok=False)
 
@@ -173,7 +173,7 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
         cid = str(cid_output).strip()
     except ProcessExecutionError as exc:
         _error(f"Failed to create container from {image}: {exc}")
-        raise SystemExit(_normalise_retcode(exc.retcode)) from exc
+        raise SystemExit(_normalize_retcode(exc.retcode)) from exc
     try:
         log(f"Exporting rootfs of {cid} → {dest}")
         # Pipe: podman export CID | tar -C dest -x
@@ -243,7 +243,7 @@ def cmd_exec(
         _error(f"No such UUID rootfs: {uuid} ({root})")
         raise SystemExit(1)
 
-    tokens = _normalise_command_args(cmd)
+    tokens = _normalize_command_args(cmd)
     inner_cmd = " ".join(shlex.quote(x) for x in tokens)
 
     selected_backends = BACKENDS
@@ -282,7 +282,7 @@ def cmd_exec(
                 context=context,
             )
         except ProcessExecutionError as exc:
-            raise SystemExit(_normalise_retcode(exc.retcode)) from exc
+            raise SystemExit(_normalize_retcode(exc.retcode)) from exc
         if outcome is None:
             next_backend = _next_available_backend(index + 1)
             if next_backend is not None:

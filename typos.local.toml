@@ -1,0 +1,23 @@
+# Repository-specific machine interfaces.
+
+schema = 1
+
+[oxford]
+stems = []
+
+[words]
+accepted = []
+
+[words.corrections]
+
+[patterns]
+ignore = [
+  # Composite-action input names and expressions are machine interfaces.
+  '(?m)^          artifact-name: wheels-\$\{\{ matrix\.os \}\}-\$\{\{ matrix\.arch \}\}$',
+  '(?m)^          artifact-name: wheels-pure$',
+  '(?m)^        name: \$\{\{ inputs\.artifact-name \}\}$',
+  '(?m)^  artifact-name:$',
+]
+
+[files]
+exclude = []

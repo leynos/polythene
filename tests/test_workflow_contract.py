@@ -119,7 +119,7 @@ def test_workflow_default_permissions_are_empty() -> None:
     )
 
 
-def test_concurrency_serialises_per_ref_without_cancelling() -> None:
+def test_concurrency_serializes_per_ref_without_cancelling() -> None:
     """Runs queue per ref instead of cancelling one another."""
     concurrency = _as_mapping(
         _load().get("concurrency"), "the workflow must declare concurrency"
