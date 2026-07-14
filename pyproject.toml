@@ -41,6 +41,7 @@ issues = "https://github.com/leynos/polythene/issues"
 
 [dependency-groups]
 dev = [
+    "pathspec==1.1.1",
     "polythene[test]",
     "ruff",
     "pyright",

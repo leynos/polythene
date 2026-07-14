@@ -25,7 +25,7 @@ class SandboxRunner(typ.Protocol):
         ...
 
 
-def _normalise_store(store: Path | str | None) -> Path:
+def _normalize_store(store: Path | str | None) -> Path:
     """Return ``store`` as an absolute :class:`Path` with sensible defaults."""
     if store is None:
         return DEFAULT_STORE
@@ -66,8 +66,8 @@ class PolytheneSession:
     _env: dict[str, str] = dc.field(init=False)
 
     def __post_init__(self) -> None:
-        """Normalise configuration derived from constructor arguments."""
-        self._store_path = _normalise_store(self.store)
+        """Normalize configuration derived from constructor arguments."""
+        self._store_path = _normalize_store(self.store)
         # Copy the environment once to avoid accidental mutation during calls.
         self._env = dict(os.environ if self.env is None else self.env)
 
@@ -147,12 +147,18 @@ class PolytheneSession:
 
     def _default_isolation(self) -> IsolationName | None:
         if explicit := self._env.get("POLYTHENE_ISOLATION"):
-            if explicit not in ISOLATION_NAMES:
-                msg = (
-                    "Invalid POLYTHENE_ISOLATION value."
-                    " Supported values: " + ", ".join(ISOLATION_NAMES)
-                )
-                raise ValueError(msg)
-            return typ.cast("IsolationName", explicit)
+            match explicit:
+                case "bubblewrap":
+                    return "bubblewrap"
+                case "proot":
+                    return "proot"
+                case "chroot":
+                    return "chroot"
+                case _:
+                    msg = (
+                        "Invalid POLYTHENE_ISOLATION value."
+                        " Supported values: " + ", ".join(ISOLATION_NAMES)
+                    )
+                    raise ValueError(msg)
 
         return "proot" if _is_truthy(self._env.get("GITHUB_ACTIONS")) else None

@@ -108,19 +108,19 @@ class _DummyBackend:
         return None if self.exit_code is None else (self.name, self.exit_code)
 
 
-def test_normalise_command_args_flattens_single_sequence() -> None:
+def test_normalize_command_args_flattens_single_sequence() -> None:
     """Internal helpers flatten nested command sequences."""
-    tokens = isolation._normalise_command_args(
+    tokens = isolation._normalize_command_args(
         typ.cast("tuple[str, ...]", (["echo", "hello"],))
     )
 
     assert tokens == ["echo", "hello"]
 
 
-def test_normalise_command_args_rejects_non_strings() -> None:
+def test_normalize_command_args_rejects_non_strings() -> None:
     """Non-string command tokens raise a descriptive ``TypeError``."""
     with pytest.raises(TypeError, match="Command tokens must be strings"):
-        isolation._normalise_command_args(typ.cast("tuple[str, ...]", ((42,),)))
+        isolation._normalize_command_args(typ.cast("tuple[str, ...]", ((42,),)))
 
 
 def test_cmd_exec_accepts_list_command(

@@ -130,6 +130,10 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.uv-cache/
+.uv-tools/
+.typos-oxendict-base.json
+.typos-oxendict-base.toml
 env/
 venv/
 ENV/
