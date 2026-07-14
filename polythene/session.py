@@ -147,12 +147,18 @@ class PolytheneSession:
 
     def _default_isolation(self) -> IsolationName | None:
         if explicit := self._env.get("POLYTHENE_ISOLATION"):
-            if explicit not in ISOLATION_NAMES:
-                msg = (
-                    "Invalid POLYTHENE_ISOLATION value."
-                    " Supported values: " + ", ".join(ISOLATION_NAMES)
-                )
-                raise ValueError(msg)
-            return typ.cast("IsolationName", explicit)
+            match explicit:
+                case "bubblewrap":
+                    return "bubblewrap"
+                case "proot":
+                    return "proot"
+                case "chroot":
+                    return "chroot"
+                case _:
+                    msg = (
+                        "Invalid POLYTHENE_ISOLATION value."
+                        " Supported values: " + ", ".join(ISOLATION_NAMES)
+                    )
+                    raise ValueError(msg)
 
         return "proot" if _is_truthy(self._env.get("GITHUB_ACTIONS")) else None
