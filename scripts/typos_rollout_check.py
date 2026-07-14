@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import subprocess
 import tomllib
+import typing as typ
 
 from pathspec import GitIgnoreSpec
 
@@ -54,8 +55,10 @@ def _document(path: Path) -> dict[str, object]:
 
 def _table(document: dict[str, object], name: str) -> dict[str, object]:
     """Return a TOML table or an empty table when it is absent."""
-    value = document.get(name, {})
-    return value if isinstance(value, dict) else {}
+    value = document.get(name)
+    if isinstance(value, dict):
+        return typ.cast("dict[str, object]", value)
+    return {}
 
 
 def _strings(table: dict[str, object], key: str) -> tuple[str, ...]:
