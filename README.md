@@ -1,5 +1,8 @@
 # Polythene
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](
+https://deepwiki.com/leynos/polythene)
+
 Polythene packages the Linux packaging helper originally shipped with the
 shared-actions repository. It bundles the Cyclopts-based command line
 interface, its plumbum process helpers, and uuid6 UUID generation so you can
