@@ -468,7 +468,11 @@ caller and asserts its shape: the workflow path, a 40-character commit SHA, the
 least-privilege permissions, the empty top-level `permissions`, the
 non-cancelling per-ref concurrency group, the schedule and dispatch triggers,
 and the two `with` values. It deliberately does not assert the SHA value, which
-Dependabot owns.
+Dependabot owns. Run these checks locally with:
+
+```shell
+uv run pytest tests/test_workflow_contract.py -v
+```
 
 `tests/test_workflow_contract.py` carries a `pytest.mark.skipif` on the
 workflow path, because mutmut's `mutants/` sandbox does not copy `.github/`;
