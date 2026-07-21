@@ -7,11 +7,11 @@ import typing as typ
 from pathlib import Path
 
 import pytest
-from conftest import CliResult
 from pytest_bdd import given, parsers, scenarios, then, when
 
 import polythene.backends as backend_module
 import polythene.isolation as isolation
+from tests.support.cli import CliResult
 
 Context = dict[str, object]
 
