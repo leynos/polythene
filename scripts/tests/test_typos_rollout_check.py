@@ -1,9 +1,9 @@
 """Test exact phrase-policy enforcement."""
 
 import importlib
-from pathlib import Path
 import subprocess
 import types
+from pathlib import Path
 
 import pytest
 

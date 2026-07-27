@@ -8,13 +8,13 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
-from pathlib import Path
 import re
 import subprocess
 import tomllib
 import typing as typ
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
 from pathspec import GitIgnoreSpec
 
