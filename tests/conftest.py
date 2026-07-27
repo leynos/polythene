@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses as dc
 import sys
 import typing as typ
 from contextlib import redirect_stderr, redirect_stdout
@@ -12,15 +11,9 @@ from runpy import run_module
 import pytest
 
 import polythene
+from tests.support.cli import CliResult
 
-
-@dc.dataclass(slots=True)
-class CliResult:
-    """Container capturing CLI output and exit status."""
-
-    exit_code: int
-    stdout: str
-    stderr: str
+__all__ = ["CliResult", "run_cli", "run_module_cli"]
 
 
 @pytest.fixture

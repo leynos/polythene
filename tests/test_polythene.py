@@ -14,7 +14,7 @@ from polythene import backends
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
-    from conftest import CliResult
+    from tests.support.cli import CliResult
 
 
 def test_cmd_pull_exports_rootfs(
