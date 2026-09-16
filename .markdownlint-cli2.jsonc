@@ -23,6 +23,10 @@
     "**/node_modules/**",
     "**/target/**",
     "**/.pytest_cache/**",
-    ".uv-cache/**"
+    ".uv-cache/**",
+    ".vtcode/**",
+    ".terraform/**",
+    "memories/**",
+    "CRUSH.md"
   ]
 }
