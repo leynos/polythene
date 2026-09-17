@@ -51,7 +51,7 @@ def _step(job: dict[str, object], name: str) -> dict[str, object]:
         None,
     )
     assert isinstance(step, dict), f"job must declare a {name!r} step"
-    return typ.cast("dict[str, object]", step)
+    return step
 
 
 def _uses(step: dict[str, object]) -> str:
