@@ -110,8 +110,9 @@ project via the Makefile targets. Helpful commands include:
 - `make test` – Execute the pytest suite.
 - `make typecheck` – Run static type checks with `ty`.
 
-Refer to the users' guide in `docs/users-guide.md` for deeper operational
-details and troubleshooting advice.
+Refer to the [developers' guide](docs/developers-guide.md) for maintainer
+workflow contracts, and the [users' guide](docs/users-guide.md) for deeper
+operational details and troubleshooting advice.
 
 ### Workflow pins and Dependabot
 
