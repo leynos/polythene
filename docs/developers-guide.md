@@ -20,9 +20,10 @@ advances the ratchet, and uploads the Cobertura report with
 the secret itself and runs only when `github.ref == 'refs/heads/main'` and the
 token is non-empty, so a `workflow_dispatch` aimed at a branch cannot publish
 that branch as `main`. Its concurrency group never cancels: a newer push
-replaces an older pending run, and the newest baseline wins. With no
-`CS_ACCESS_TOKEN` repository secret the upload skips; the ratchet baseline is
-still written.
+replaces an older pending run, and the newest baseline wins. The group is keyed
+on `github.ref`, so a branch dispatch cannot displace a pending push to `main`.
+With no `CS_ACCESS_TOKEN` repository secret the upload skips; the ratchet
+baseline is still written.
 
 Keep CodeScene credentials and upload actions in `coverage-main.yml`. The
 retired `installer-checksum` input, the `CODESCENE_CLI_SHA256` variable, and the
