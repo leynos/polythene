@@ -111,7 +111,9 @@ project via the Makefile targets. Helpful commands include:
 - `make typecheck` – Run static type checks with `ty`.
 
 Refer to the users' guide in `docs/users-guide.md` for deeper operational
-details and troubleshooting advice.
+details and troubleshooting advice, and to the developers' guide in
+`docs/developers-guide.md` for development conventions such as the
+mutation-testing workflow contract tests.
 
 ### Workflow pins and Dependabot
 
