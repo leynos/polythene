@@ -1,0 +1,82 @@
+name: Coverage (main)
+
+# The one CodeScene publisher. Pull-request CI runs the local ratchet only;
+# this workflow owns the main baseline and publishes its coverage report to
+# CodeScene after every merge. Caches saved on main are readable by every
+# pull-request run, so ci.yml's generate-coverage selection has to match the
+# one below field for field. tests/workflow_contracts holds that shape.
+#
+# workflow_dispatch lets the upload be re-run on demand, because merges made
+# by the automerge workflow's GITHUB_TOKEN fire no push event.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# One group per ref, never cancelled. Runs for main never overlap, and
+# GitHub keeps at most one pending run per group, so a newer trigger
+# replaces an older pending run rather than queueing behind it. The group
+# is keyed on the ref alone, so a branch dispatch cannot replace a pending
+# push to main. GitHub does not promise to start runs in trigger order, so
+# this is not a guarantee of commit order: an older run can still publish
+# last, and its coverage and baseline then stand until a later successful
+# run supersedes them, which is accepted. A manual re-run of an older run
+# keeps its SHA and its run id: it republishes that commit's coverage to
+# CodeScene, but its baseline cache key already exists, so it replaces no
+# baseline unless the original run saved none. A dispatch on main that
+# replaces a pending push leaves the ratchet baseline a commit behind until
+# the next push, which is accepted.
+concurrency:
+  group: coverage-main-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  coverage-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.1.0
+
+      - name: Generate coverage
+        uses: leynos/shared-actions/.github/actions/generate-coverage@dbe2e22ceaf498d85512679ccded38be9dbe7777
+        with:
+          language: python
+          python-source: ./polythene
+          output-path: coverage.xml
+          format: cobertura
+          pytest-workers: ''
+          with-ratchet: 'true'
+
+      # Whether the token exists, learnt without binding it: the expression
+      # is evaluated before the shell runs, so no step holds the secret.
+      - name: Check for the CodeScene token
+        id: codescene-token
+        run: echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload coverage data to CodeScene
+        # The ref as well as the token: a dispatch can name any branch, and
+        # without this guard it would upload that branch's coverage as main's.
+        # The token goes in only as the input: the uploader is a composite
+        # action, and a step `env` would reach every action nested in it.
+        if: steps.codescene-token.outputs.available == 'true' && github.ref == 'refs/heads/main'
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@dbe2e22ceaf498d85512679ccded38be9dbe7777
+        with:
+          format: cobertura
+          path: coverage.xml
+          mode: upload
+          access-token: ${{ secrets.CS_ACCESS_TOKEN }}
