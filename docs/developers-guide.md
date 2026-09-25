@@ -13,6 +13,13 @@ uploads no artefact (`publish-artefact: 'false'`). It does not fetch full Git
 history, invoke CodeScene, or receive `CS_ACCESS_TOKEN`. The step is guarded to
 the `pull_request` event, because `generate-coverage` saves its baseline on a
 push to `main` and `coverage-main.yml` must be the only workflow writing it.
+Both `generate-coverage` steps set `UV_PYTHON: '3.13'`, the interpreter
+`setup-python` installs. The action builds its coverage environment with
+whatever interpreter uv finds first, and in the pull-request lane an earlier
+step leaves a managed Python 3.14 for it to find, so without the pin the lane
+and the publisher measured the same selection on different interpreters (80.82%
+against 81.27%). The contract requires every generator to carry the publisher's
+step `env`.
 
 After each merge, `coverage-main.yml` regenerates the same measurement,
 advances the ratchet, and uploads the Cobertura report with
