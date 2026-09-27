@@ -12,6 +12,7 @@ import pytest
 from .codescene_publisher import (
     concurrency_violations,
     find_publisher,
+    permission_violations,
     retired_checksum_violations,
     trigger_violations,
     upload_step_violations,
@@ -19,6 +20,7 @@ from .codescene_publisher import (
 from .coverage_lanes import (
     publisher_lane_violations,
     pull_request_lane_violations,
+    report_violations,
     second_writer_violations,
 )
 from .fixtures import PUBLISHER, PULL_REQUEST_LANE, REPOSITORY, mutate, replaced, tree
@@ -237,12 +239,29 @@ def test_a_push_lane_cannot_write_a_baseline_through_a_callee() -> None:
         ),
         ("coverage-main.yml", "          with-ratchet: 'true'\n", ""),
         ("ci.yml", "generate-coverage@" + "a" * 40, "generate-coverage@" + "b" * 40),
+        # An interpreter pinned on one side only measures on another Python.
+        (
+            "ci.yml",
+            "        if: github.event_name == 'pull_request'\n",
+            (
+                "        if: github.event_name == 'pull_request'\n"
+                "        env:\n          UV_PYTHON: '3.14'\n"
+            ),
+        ),
+        (
+            "coverage-main.yml",
+            "      - name: Generate coverage\n",
+            (
+                "      - name: Generate coverage\n"
+                "        env:\n          UV_PYTHON: '3.14'\n"
+            ),
+        ),
     ],
 )
 def test_the_publisher_measures_what_each_lane_measures(
     name: str, old: str, new: str
 ) -> None:
-    """A selection or pin differing from the publisher's is refused."""
+    """A selection, pin or step env differing from the publisher's is refused."""
     documents = _documents(mutate(name, old, new))
     closure = {"ci.yml": documents["ci.yml"]}
     found = publisher_lane_violations(documents["coverage-main.yml"], closure)
@@ -255,3 +274,44 @@ def test_a_substitution_that_changes_nothing_is_refused() -> None:
         replaced(PUBLISHER, "absent text", "anything")
     with pytest.raises(ValueError, match="would change nothing"):
         replaced(PUBLISHER, "mode: upload", "mode: upload")
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        # A workflow-scope grant reaches every job that declares none.
+        ("permissions: {}\n", ""),
+        ("permissions: {}\n", "permissions: write-all\n"),
+        # The upload job needs its checkout and nothing else.
+        ("    permissions:\n      contents: read\n", ""),
+        ("      contents: read\n", "      contents: write\n"),
+        ("      contents: read\n", "      contents: read\n      id-token: write\n"),
+    ],
+)
+def test_the_publisher_grants_only_read_access(old: str, new: str) -> None:
+    """A wider or missing grant at either scope is refused."""
+    found = permission_violations(_publisher(mutate("coverage-main.yml", old, new)))
+    assert found, found
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            "          path: coverage.xml\n",
+            "          path: lcov.info\n",
+        ),
+        (
+            "          format: cobertura\n          mode: upload\n",
+            "          format: lcov\n          mode: upload\n",
+        ),
+        (
+            "          format: cobertura\n          mode: upload\n",
+            "          mode: upload\n",
+        ),
+    ],
+)
+def test_the_uploader_reads_the_generated_report(old: str, new: str) -> None:
+    """An uploader naming another path or format than the generator's is refused."""
+    found = report_violations(_publisher(mutate("coverage-main.yml", old, new)))
+    assert found, found
