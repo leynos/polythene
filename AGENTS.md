@@ -108,9 +108,7 @@ When implementing changes, adhere to the following testing procedures:
 
   - For Markdown files (`.md` only):
     - **Linting:** Passes lint checks (`make markdownlint` or integrated editor
-      linting). This target also enforces en-GB-oxendict spelling with pinned
-      `typos`; update `typos.local.toml`, then run `make spelling-config`
-      instead of editing generated `typos.toml` entries.
+      linting), including spelling; see [Spelling](#spelling).
     - **Mermaid diagrams:** Passes validation using nixie (`make nixie`)
 - **Committing:**
   - Only changes that meet all the quality gates above should be committed.
@@ -127,6 +125,22 @@ When implementing changes, adhere to the following testing procedures:
     - **Formatting:** Use Markdown for any formatted text (like bullet points
       or code snippets) within the commit message body.
   - Do not commit changes that fail any of the quality gates.
+
+<!-- typos-config-builder:agents-md:start -->
+
+## Spelling
+
+- `make spelling` runs the pinned `typos-config-builder gate`, which
+  regenerates `typos.toml` from the shared en-GB-oxendict dictionary and
+  `typos.local.toml`, then checks spelling and the shared phrase corrections.
+- `typos.toml` is generated: never edit it by hand. Put narrow
+  repository-specific exceptions in `typos.local.toml`, as exact or full-line
+  patterns rather than bare accepted words.
+- When `make spelling` changes `typos.toml`, commit the regenerated file. If
+  the change is unrelated to your work, commit it in a separate base pull
+  request and stack your branch on it, so each review diff stays focused.
+
+<!-- typos-config-builder:agents-md:end -->
 
 ## Refactoring Heuristics & Workflow
 
