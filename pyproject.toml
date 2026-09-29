@@ -46,7 +46,7 @@ dev = [
     "pyright",
     "pytest-timeout",
     "pyyaml>=6.0.3",
-    "packaging>=25.0",
+    "packaging>=25.0,<27",
 ]
 
 [tool.setuptools.packages.find]
