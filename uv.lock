@@ -246,6 +246,7 @@ test = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "packaging" },
     { name = "polythene", extra = ["test"] },
     { name = "pyright" },
     { name = "pytest-timeout" },
@@ -265,6 +266,7 @@ provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "packaging", specifier = ">=25.0,<27" },
     { name = "polythene", extras = ["test"] },
     { name = "pyright" },
     { name = "pytest-timeout" },
