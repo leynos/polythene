@@ -18,7 +18,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # OIDC workflow-source resolution
-    uses: leynos/shared-actions/.github/workflows/mutation-mutmut.yml@dbe2e22ceaf498d85512679ccded38be9dbe7777
+    uses: leynos/shared-actions/.github/workflows/mutation-mutmut.yml@8250c914bd32aeacfdf8d9e87b804ec0024ee83e
     with:
       paths: "polythene/"
       module-prefix-strip: ""
