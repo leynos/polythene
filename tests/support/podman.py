@@ -77,8 +77,10 @@ class RecordingPodman:
 
     binary: str
     default_outcome: object = 0
-    calls: list[CommandRecord] = dc.field(default_factory=list)
-    _outcomes: list[tuple[tuple[str, ...], object]] = dc.field(default_factory=list)
+    calls: list[CommandRecord] = dc.field(default_factory=list[CommandRecord])
+    _outcomes: list[tuple[tuple[str, ...], object]] = dc.field(
+        default_factory=list[tuple[tuple[str, ...], object]]
+    )
 
     def script(self, *args: str, outcome: object) -> None:
         """Produce ``outcome`` for commands whose arguments start with ``args``.
@@ -135,7 +137,7 @@ class RecordingTools:
 
     podman: RecordingPodman
     tar: RecordingPodman
-    requested: list[str] = dc.field(default_factory=list)
+    requested: list[str] = dc.field(default_factory=list[str])
 
 
 def install_recording_tools(monkeypatch: pytest.MonkeyPatch) -> RecordingTools:
