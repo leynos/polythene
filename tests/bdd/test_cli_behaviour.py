@@ -12,6 +12,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 import polythene.backends as backend_module
 import polythene.isolation as isolation
 from tests.support.cli import CliResult
+from tests.support.podman import RecordingTools, install_recording_tools
 
 Context = dict[str, object]
 
@@ -21,6 +22,15 @@ def _store_path(cli_context: Context) -> Path:
     store = cli_context["store"]
     assert isinstance(store, Path), f"store must be a Path, got {type(store).__name__}"
     return store
+
+
+def _podman_tools(cli_context: Context) -> RecordingTools:
+    """Return the recording Podman doubles recorded in ``cli_context``."""
+    tools = cli_context["podman"]
+    assert isinstance(tools, RecordingTools), (
+        f"podman must be RecordingTools, got {type(tools).__name__}"
+    )
+    return tools
 
 
 scenarios("../features/polythene_cli.feature")
@@ -71,6 +81,19 @@ def stub_export(monkeypatch: pytest.MonkeyPatch) -> None:
         dest.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(isolation, "export_rootfs", _fake)
+
+
+@given(parsers.parse('Podman already records the image "{image}"'))
+def stub_local_image(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_context: Context,
+    image: str,
+) -> None:
+    """Run the real ``export_rootfs`` with the image present in local storage."""
+    tools = install_recording_tools(monkeypatch)
+    tools.podman.script("image", "exists", outcome=(0, "", ""))
+    tools.podman.script("create", outcome=(0, "container-id\n", ""))
+    cli_context["podman"] = tools
 
 
 @given("proot execution is stubbed")
@@ -158,6 +181,15 @@ def assert_rootfs_exists(cli_context: Context, uuid: str) -> None:
     """Ensure the exported rootfs folder exists on disk."""
     store = _store_path(cli_context)
     assert (store / uuid).is_dir()
+
+
+@then(parsers.parse('Podman probed for "{image}" but never pulled'))
+def assert_probe_without_pull(cli_context: Context, image: str) -> None:
+    """Verify the probe ran against ``image`` and no registry pull happened."""
+    tools = _podman_tools(cli_context)
+    probe = tools.podman.find("image", "exists")
+    assert [record.argv for record in probe] == [("podman", "image", "exists", image)]
+    assert tools.podman.find("pull") == []
 
 
 @then("proot ran without requesting a login shell")
