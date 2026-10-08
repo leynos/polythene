@@ -105,7 +105,7 @@ spelling: ## Enforce en-GB-oxendict spelling and shared phrase corrections
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	nixie --no-sandbox
 
-test: build uv pytest ## Run tests
+test: build uv pytest test-workflow-contracts ## Run tests
 	uv run pytest -v
 
 help: ## Show available targets
