@@ -57,7 +57,7 @@ jobs:
         uses: astral-sh/setup-uv@v10.2.0
 
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@774cc5a01e457714aede66e14a97b3e257812fc2
+        uses: leynos/shared-actions/.github/actions/generate-coverage@c17d433f99daa94e53ca5eb566088518a312cb71
         # Pinned to the interpreter setup-python installs, in both lanes:
         # the action builds its coverage environment with whatever
         # interpreter uv finds first, which an earlier step's managed
@@ -85,7 +85,7 @@ jobs:
         # The token goes in only as the input: the uploader is a composite
         # action, and a step `env` would reach every action nested in it.
         if: steps.codescene-token.outputs.available == 'true' && github.ref == 'refs/heads/main'
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@774cc5a01e457714aede66e14a97b3e257812fc2
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@c17d433f99daa94e53ca5eb566088518a312cb71
         with:
           format: cobertura
           path: coverage.xml
