@@ -138,7 +138,7 @@ def _local_image_exists(
 
     Uses ``podman image exists`` so the probe never contacts a registry. The
     probe runs through the same resolved ``podman`` command as container
-    creation, so both see the caller's rootless store.
+    creation, so both see the caller's Podman store.
 
     Returns
     -------

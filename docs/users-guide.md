@@ -73,7 +73,7 @@ The pull command:
 Because the probe reads local storage rather than a registry, an image you
 built in the same job can be reused without publishing it. The probe and the
 subsequent container creation resolve the same `podman` command and inherit the
-same environment, so both see the same rootless store:
+same environment, so both see the same Podman store:
 
 ```shell
 podman build --tag localhost/example:latest .
