@@ -65,9 +65,32 @@ python -m polythene pull docker.io/library/busybox:latest
 The pull command:
 
 - ensures the store directory exists,
-- calls `podman` to pull the requested container image,
+- probes the active Podman store with `podman image exists IMAGE`,
+- pulls the image only when that probe reports it absent,
 - exports the image into a UUID-named root filesystem directory, and
 - prints the generated UUID to stdout for later reuse.
+
+Because the probe reads local storage rather than a registry, an image you
+built in the same job can be reused without publishing it. The probe and the
+subsequent container creation resolve the same `podman` command and inherit the
+same environment, so both see the same Podman store:
+
+```shell
+podman build --tag localhost/example:latest .
+uv run polythene pull localhost/example:latest --store ./polythene-store
+```
+
+Without the probe, Podman would read the `localhost` component of that
+reference as a registry host and try to reach `https://localhost/v2/`, which
+fails when no registry is listening there.
+
+An image is only reused when it is visible to the Podman user and storage
+configuration Polythene inherits. Building it with a different
+`--storage-driver`, a different `CONTAINERS_STORAGE_CONF`, or under another
+user places it in a separate store, and the probe will report it absent so
+Polythene falls back to pulling it. The same applies when a probe fails for an
+unrelated reason such as unreadable local storage: Polythene reports that
+status instead of silently treating the image as missing.
 
 Podman must be installed and available on `PATH`. When the `POLYTHENE_VERBOSE`
 variable is set, the command also prints progress messages to stderr.

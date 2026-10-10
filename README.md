@@ -70,9 +70,12 @@ uv run polythene pull docker.io/library/busybox:latest
 python -m polythene pull docker.io/library/busybox:latest
 ```
 
-The `pull` command downloads the image, exports it to a UUID-named directory in
-`/var/tmp/polythene` (or the location provided with `--store`), and prints that
-UUID to stdout. Use the UUID with `exec`:
+The `pull` command exports the image to a UUID-named directory in
+`/var/tmp/polythene` (or the location provided with `--store`) and prints that
+UUID to stdout. It probes the active Podman store first and downloads the image
+only when it is not already present, so an image built locally under a tag such
+as `localhost/example:latest` is reused instead of being resolved against a
+registry. Use the UUID with `exec`:
 
 ```shell
 uv run polythene exec 018f6a4c-2f25-7642-bb1d-d523b6b0e05d -- uname -a

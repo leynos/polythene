@@ -8,6 +8,16 @@ Feature: Polythene CLI interactions
     And stdout equals "uuid-abc"
     And the rootfs directory "uuid-abc" exists
 
+  Scenario: Reusing a locally built image without a registry pull
+    Given a clean store directory
+    And UUID generation returns "uuid-local"
+    And Podman already records the image "localhost/example:latest"
+    When I run the CLI with arguments "pull localhost/example:latest --store {store}"
+    Then the CLI exits with code 0
+    And stdout equals "uuid-local"
+    And the rootfs directory "uuid-local" exists
+    And Podman probed for "localhost/example:latest" but never pulled
+
   Scenario: Invoking the CLI via python -m polythene
     Given a clean store directory
     And UUID generation returns "uuid-module"

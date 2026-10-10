@@ -20,6 +20,9 @@ from uuid6 import uuid7
 from .backends import Backend, BackendContext, create_backends, ensure_runtime_paths
 from .script_utils import ensure_directory, get_command, run_cmd
 
+if typ.TYPE_CHECKING:
+    from plumbum.commands.base import BaseCommand
+
 # -------------------- Configuration --------------------
 
 CONTAINER_TMP = Path(tempfile.gettempdir())
@@ -126,6 +129,45 @@ def _normalize_retcode(retcode: int | None) -> int:
     return int(retcode)
 
 
+def _local_image_exists(
+    podman: BaseCommand,
+    image: str,
+    timeout: int | None,
+) -> bool:
+    """Report whether ``image`` is present in the active Podman store.
+
+    Uses ``podman image exists`` so the probe never contacts a registry. The
+    probe runs through the same resolved ``podman`` command as container
+    creation, so both see the caller's Podman store.
+
+    Returns
+    -------
+    bool
+        ``True`` when Podman reports the image as present, ``False`` when it
+        reports absence.
+
+    Raises
+    ------
+    SystemExit
+        If the exit status is neither 0 nor 1. Status 125 means Podman could
+        not read local storage, which is reported rather than read as absence
+        so the failure is not mistaken for a missing image.
+
+    """
+    result = run_cmd(
+        podman["image", "exists", image],
+        timeout=timeout,
+        retcode=None,
+    )
+    retcode, _stdout, stderr = typ.cast("tuple[int, str, str]", result)
+    if retcode == 0:
+        return True
+    if retcode == 1:
+        return False
+    _error(f"Failed to check for local image {image}: {stderr.strip()}")
+    raise SystemExit(_normalize_retcode(retcode))
+
+
 def log(msg: str) -> None:
     """Print ``msg`` to stderr with a timestamp when verbose mode is enabled."""
     if VERBOSE:
@@ -147,17 +189,27 @@ def generate_uuid() -> str:
 
 
 def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None:
-    """Export a container image filesystem to dest/ via podman create+export."""
+    """Export a container image filesystem to dest/ via podman create+export.
+
+    The image is pulled only when the probe reports it absent from the active
+    Podman store; either way the container is created with ``--pull=never``
+    against that same store, so ``exec`` stays offline afterwards.
+    """
     podman = get_command("podman")
     tar = get_command("tar")
 
-    # Pull explicitly (keeps exec fully offline later)
-    log(f"Pulling {image} …")
-    try:
-        run_cmd(podman["pull", image], fg=True, timeout=timeout)
-    except ProcessExecutionError as exc:
-        _error(f"Failed to pull image {image}: {exc}")
-        raise SystemExit(_normalize_retcode(exc.retcode)) from exc
+    # Probe first: an image already in local storage is usable as-is, and
+    # pulling it would make Podman treat a bare "localhost/..." reference as
+    # a registry host and fail when no registry is listening there.
+    if _local_image_exists(podman, image, timeout):
+        _error(f"Using local image {image}")
+    else:
+        log(f"Pulling {image} …")
+        try:
+            run_cmd(podman["pull", image], fg=True, timeout=timeout)
+        except ProcessExecutionError as exc:
+            _error(f"Failed to pull image {image}: {exc}")
+            raise SystemExit(_normalize_retcode(exc.retcode)) from exc
 
     ensure_directory(dest, exist_ok=False)
 
