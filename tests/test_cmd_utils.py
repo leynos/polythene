@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import typing as typ
 
 import pytest
@@ -11,6 +13,15 @@ from plumbum.commands.processes import (
 )
 
 from polythene.cmd_utils import TimeoutConflictError, _merge_timeout, run_cmd
+
+
+def _stream_payload() -> str:
+    """Return a snippet writing distinct markers to stdout and stderr."""
+    return (
+        "import sys;"
+        " sys.stdout.write('child-stdout-marker\\n');"
+        " sys.stderr.write('child-stderr-marker\\n')"
+    )
 
 
 def test_run_cmd_command_logs_and_succeeds(
@@ -33,6 +44,40 @@ def test_run_cmd_adapter_handles_output(capsys: pytest.CaptureFixture[str]) -> N
     captured = capsys.readouterr()
     assert result == 0
     assert "python -c" in captured.err
+
+
+def test_run_cmd_foreground_inherits_stdout_without_overrides(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A foreground call without stream overrides still inherits stdout."""
+    cmd = local[sys.executable]["-c", _stream_payload()]
+
+    assert run_cmd(cmd, fg=True) == 0
+
+    captured = capfd.readouterr()
+    assert "child-stdout-marker" in captured.out
+    assert "child-stderr-marker" in captured.err
+
+
+@pytest.mark.parametrize("timeout", [None, 30])
+def test_run_cmd_foreground_honours_stdout_sink(
+    timeout: int | None,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """An explicit stdout sink silences the child with or without a timeout.
+
+    The sink is checked with ``capfd`` because it must reach the child's real
+    file descriptor; ``capsys`` would only see Python-level writes.
+    """
+    cmd = local[sys.executable]["-c", _stream_payload()]
+
+    assert run_cmd(cmd, fg=True, timeout=timeout, stdout=subprocess.DEVNULL) == 0
+
+    captured = capfd.readouterr()
+    assert "child-stdout-marker" not in captured.out
+    # The echo of the invocation also reaches stderr, so assert the exact line
+    # the child wrote rather than a substring match.
+    assert "child-stderr-marker" in captured.err.splitlines()
 
 
 def test_run_cmd_rejects_string_commands() -> None:
