@@ -694,6 +694,21 @@ to pin `UV_PYTHON` to that version, inside the project's `requires-python`
 commit, the target stops running the pinned checker, the repository parameter
 is wrong, `make all` drops the target or CI stops running it.
 
+## YAML lint
+
+`make lint` runs `yamllint --strict` over every Git-tracked `*.yml` and
+`*.yaml` file, then `actionlint` over the workflows, which also runs
+`shellcheck` over their `run:` scripts. Install yamllint 1.38.0, actionlint
+1.7.12 and shellcheck 0.11.0 locally, as CI does through the shared
+`install-yaml-lint` action, so results agree. Run the targets from the
+repository root: yamllint resolves `.yamllint.yml`, which extends the estate
+base `.yamllint-estate.yml` (copied verbatim, never edited here), against the
+working directory. `.github/actionlint.yaml` declares the `ubicloud-*` runner
+labels. `tests/yaml_lint/` judges the Makefile and workflow wiring against
+fixtures and then the real files, pins the estate base, and runs the Make
+targets with stand-in tools (and the real yamllint when installed) to prove the
+tracked-files list and that a tool failure fails its target.
+
 ## Publishing a release
 
 Releases are published by `.github/workflows/release.yml`, triggered by a tag
