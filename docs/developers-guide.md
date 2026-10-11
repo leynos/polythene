@@ -361,7 +361,7 @@ inside the working copy.
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `all`                     | The default goal: `build`, `check-fmt`, `test`, `typecheck`, `spelling`, `test-workflow-contracts`                |
 | `build`                   | Create `.venv` and install the development dependencies                                                           |
-| `test`                    | `build`, then `uv run pytest -v`, then `test-workflow-contracts`                                                  |
+| `test`                    | `build`, `uv`, `pytest`, and `test-workflow-contracts` prerequisites, then `uv run pytest -v`                     |
 | `test-workflow-contracts` | Run the pinned `cv005-contracts check --repository .`                                                             |
 | `lint`                    | `ruff check polythene tests`                                                                                      |
 | `fmt`                     | Apply fixes: `ruff format`, `ruff check --select I --fix`, `mdtablefix --in-place`, and `markdownlint-cli2 --fix` |
