@@ -72,6 +72,8 @@ jobs:
       - name: Validate Mermaid diagrams
         run: make nixie
 
+      - name: Install the YAML lint tools
+        uses: leynos/shared-actions/.github/actions/install-yaml-lint@26c918632c5413039a84358fafe012a4399a9ec7
       - name: Run ruff
         run: make lint
 

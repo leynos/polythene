@@ -30,7 +30,7 @@ TYPOS_CONFIG_BUILDER = $(UV_ENV) $(UV) tool run --python 3.14 --from \
 	typos-config-builder
 
 .PHONY: help all clean build build-release lint fmt check-fmt markdownlint \
-	nixie spelling test typecheck $(TOOLS) $(VENV_TOOLS) test-workflow-contracts interrogate
+	nixie spelling test typecheck $(TOOLS) $(VENV_TOOLS) test-workflow-contracts interrogate yamllint actionlint
 
 .DEFAULT_GOAL := all
 test-workflow-contracts: ## Check the CV-005 CodeScene workflow contracts
@@ -114,7 +114,7 @@ interrogate: ## Enforce complete Python docstring coverage
 	    exit 1; \
 	  fi
 
-lint: interrogate ruff ## Run linters
+lint: interrogate ruff yamllint actionlint ## Run linters
 	ruff check $(PYTHON_TARGETS)
 
 typecheck: build ty ## Run typechecking
@@ -137,6 +137,17 @@ nixie: $(NIXIE) ## Validate Mermaid diagrams
 
 test: build uv pytest test-workflow-contracts ## Run tests
 	uv run pytest -v
+
+YAMLLINT ?= yamllint
+ACTIONLINT ?= actionlint
+
+# yamllint reads `.yamllint.yml`, which extends `.yamllint-estate.yml`, and
+# resolves that path against the working directory, so it runs from the root.
+yamllint: ## Lint every tracked YAML file strictly
+	git ls-files -z '*.yml' '*.yaml' | xargs -0 -r $(YAMLLINT) --strict --
+
+actionlint: ## Lint the GitHub Actions workflows, including their shell scripts
+	$(ACTIONLINT)
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
