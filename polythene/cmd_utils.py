@@ -73,6 +73,11 @@ Command = SupportsFormulate
 
 KwargDict = dict[str, object]
 
+# Stream keys that ``run_cmd`` may forward to a command's ``run``. A caller
+# supplying one wants that stream redirected, which ``FG`` cannot express: it
+# hard-codes inherited streams. Such calls therefore take the ``run`` path.
+_STREAM_KEYS = frozenset({"stdin", "stdout", "stderr"})
+
 
 def _merge_timeout(timeout: float | None, run_kwargs: KwargDict) -> float | None:
     """Return the timeout to enforce, preferring ``run_kwargs`` when present."""
@@ -84,6 +89,32 @@ def _merge_timeout(timeout: float | None, run_kwargs: KwargDict) -> float | None
     return timeout
 
 
+def _run_fg_with_overrides(
+    cmd: Command,
+    timeout: float | None,
+    run_kwargs: KwargDict,
+) -> None:
+    """Run ``cmd`` in the foreground on the ``run`` path.
+
+    ``run`` is the only foreground route that honours explicit stream
+    overrides, so calls that pass one arrive here. Unset streams default to
+    ``None`` (inherit), which keeps the wrapper as transparent as ``FG``.
+    """
+    if not isinstance(cmd, SupportsRun):
+        msg = "Command does not support timeout execution"
+        raise TypeError(msg)
+    run_kwargs.setdefault("stdout", None)
+    run_kwargs.setdefault("stderr", None)
+    from plumbum.commands.processes import (  # pyright: ignore[reportMissingTypeStubs]
+        ProcessTimedOut,
+    )
+
+    try:
+        cmd.run(timeout=timeout, **run_kwargs)
+    except ProcessTimedOut as exc:
+        raise TimeoutError from exc
+
+
 def run_cmd(
     cmd: Command,
     *,
@@ -91,7 +122,13 @@ def run_cmd(
     timeout: float | None = None,
     **run_kwargs: object,
 ) -> object:
-    """Execute ``cmd`` while echoing it to stderr."""
+    """Execute ``cmd`` while echoing it to stderr.
+
+    Foreground calls inherit this process's streams unless the caller passes an
+    explicit ``stdin``, ``stdout`` or ``stderr`` override; only then does the
+    command run through ``run`` instead of ``FG``. Pass ``subprocess.DEVNULL``
+    as ``stdout`` to keep a chatty tool from writing to the caller's stdout.
+    """
     timeout = _merge_timeout(timeout, run_kwargs)
     if not isinstance(cmd, SupportsFormulate):
         msg = "Command must be a plumbum invocation or pipeline"
@@ -99,20 +136,8 @@ def run_cmd(
 
     print(f"$ {cmd}", file=sys.stderr)
     if fg:
-        if timeout is not None:
-            if not isinstance(cmd, SupportsRun):
-                msg = "Command does not support timeout execution"
-                raise TypeError(msg)
-            run_kwargs.setdefault("stdout", None)
-            run_kwargs.setdefault("stderr", None)
-            from plumbum.commands.processes import (  # pyright: ignore[reportMissingTypeStubs]
-                ProcessTimedOut,
-            )
-
-            try:
-                cmd.run(timeout=timeout, **run_kwargs)
-            except ProcessTimedOut as exc:
-                raise TimeoutError from exc
+        if timeout is not None or _STREAM_KEYS & run_kwargs.keys():
+            _run_fg_with_overrides(cmd, timeout, run_kwargs)
             return 0
         if isinstance(cmd, SupportsRunFg):
             cmd.run_fg(**run_kwargs)
