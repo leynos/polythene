@@ -65,7 +65,8 @@ flowchart TD
     backends --> script
     script --> cmd
     script -->|"get_command"| tools["podman, tar,<br/>bwrap, proot, chroot"]
-    session["session.py<br/>PolytheneSession"] --> cli
+    init --> session["session.py<br/>PolytheneSession"]
+    session --> cli
     session -->|"argv"| runner["SandboxRunner<br/>supplied by the caller"]
     runner -.->|"uv run polythene exec"| cli
 ```
@@ -278,10 +279,17 @@ The details that callers depend on:
 
 ## Testing strategy
 
-Every test lives under `tests/`, which is a real package rather than a
-collection of rootdir-relative directories: the `__init__.py` files give each
-module one unambiguous dotted path such as `tests.support.cli`. There is no
-`tests/unit/` directory.
+Every test lives under `tests/`. `tests/`, `tests/bdd/`, and `tests/support/`
+are real packages: their `__init__.py` files give each module one unambiguous
+dotted path such as `tests.support.cli`, so a helper can be imported by name
+from anywhere in the suite. There is no `tests/unit/` directory.
+
+`tests/workflow_contracts/` is the exception. It has no `__init__.py`, so
+pytest imports its single module by the bare filename — `test_cv005_wiring`, not
+`tests.workflow_contracts.test_cv005_wiring` — and puts the directory on
+`sys.path` to do it. Nothing in that module imports a sibling, so the two
+conventions do not collide; a helper added there would need the package
+treatment the rest of the suite uses.
 
 | Location                                        | Contents                                                                                                                                                              |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
