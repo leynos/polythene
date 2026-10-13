@@ -25,7 +25,9 @@ a command runs:
 
 - `DEFAULT_STORE` is `POLYTHENE_STORE` when that variable is set, and
   `tempfile.gettempdir()/polythene` otherwise, resolved to an absolute path.
-- `VERBOSE` is true when `POLYTHENE_VERBOSE` is set to any value.
+- `VERBOSE` is true when `POLYTHENE_VERBOSE` is set to any non-empty value.
+  The test is `bool(os.environ.get(...))`, so an empty string leaves verbose
+  mode off.
 - `IS_ROOT` records whether the effective user is root (`os.geteuid() == 0`).
 - `BACKENDS` is the registry returned by `create_backends()`, in the fixed
   order bubblewrap, proot, chroot.
@@ -105,9 +107,17 @@ Exit codes are few and deliberate:
 | `126` | `cmd_exec`                      | Every isolation backend declined                                           |
 | `127` | `get_command`                   | A required binary, such as `podman`, is not on `PATH`                      |
 
-Other statuses are propagated rather than translated: a backend's non-zero
-status, a failed `podman` invocation's status, and an unexpected probe status
-all become the CLI's exit code.
+Other statuses are propagated rather than translated in the places that handle
+them: a backend's non-zero status from `cmd_exec`, and an unexpected probe
+status, each become the CLI's exit code, as do the statuses of `podman pull` and
+`podman create`, which are caught as `ProcessExecutionError` and passed through
+`_normalize_retcode`.
+
+The export pipeline is the exception. `podman export CID | tar -C DEST -x` runs
+inside a `try/finally` that only removes the container; there is no
+`except ProcessExecutionError`, so a failed export leaks plumbum's exception
+instead of translating it, and the interpreter's traceback exit status is what
+the caller observes rather than the failing command's status.
 
 `PolytheneSession` builds an argument vector and hands it to its runner. It
 does not execute anything itself, does not create or clean the store, and does
@@ -213,8 +223,17 @@ that any of the three blocks network access.
 `run_cmd` is the single place that starts an external command. It echoes
 `$ <command>` to stderr before running, rejects anything that is not a plumbum
 invocation or pipeline with `TypeError`, and raises `TimeoutConflictError` when
-a timeout arrives both as an argument and in `**run_kwargs`. On expiry it
-re-raises plumbum's `ProcessTimedOut` as the builtin `TimeoutError`.
+a timeout arrives both as an argument and in `**run_kwargs`.
+
+Timeout translation is confined to the foreground path. When `fg=True` and a
+timeout is set, the call runs under `cmd.run(timeout=...)` and plumbum's
+`ProcessTimedOut` is re-raised as the builtin `TimeoutError`. The
+non-foreground path forwards the timeout to `cmd.run` without that `except`
+clause, so a non-foreground call that times out — the `podman image exists`
+probe and `podman create` in `export_rootfs` are the two in this package —
+raises `ProcessTimedOut` to its caller rather than `TimeoutError`.
+`ProcessTimedOut` derives from `Exception`, not `ProcessExecutionError`, so the
+surrounding `except ProcessExecutionError` handlers do not catch it.
 
 The `timeout` value travels with each operation rather than the invocation: in
 `pull` it reaches the probe, the pull, `create`, the export, and `rm`, and in
@@ -416,8 +435,13 @@ fails the target with a message naming it. Beyond that:
   a run that rewrites that file expects the regenerated version to be committed.
 - `build-release` uses the plain `python` on `PATH` rather than the virtual
   environment, and `build` is not a member of the development group, so the
-  target assumes `build` is importable from that interpreter. `clean` is the
-  target to run first when it is not.
+  target assumes `build` is importable from that interpreter. Where it is not,
+  the recipe fails with `No module named build`, and `make clean` will not fix
+  it: `clean` deletes `build` outputs and `.venv`, and the `build` prerequisite
+  then recreates the virtual environment, but the recipe still invokes the same
+  `PATH` interpreter. Install the backend for that interpreter
+  (`python -m pip install build`) or supply it for one run
+  (`uv run --with build python -m build --sdist --wheel`).
 
 ## Continuous integration
 
