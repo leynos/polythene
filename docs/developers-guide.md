@@ -78,12 +78,14 @@ is wrong, `make all` drops the target or CI stops running it.
 through Plumbum. A foreground call inherits the caller's stdin, stdout, and
 stderr unless it passes an explicit stream override; supplying one makes the
 call run through Plumbum's `run` instead of `FG`, because `FG` hard-codes
-inherited streams. Timed foreground calls already take that path, so
-`--timeout` and no-timeout runs behave identically. Pass `subprocess.DEVNULL` as
-`stdout` when a tool writes to stdout that must not reach the caller —
-`polythene pull` does this for `podman pull` and `podman rm` so the UUID stays
-the only line it prints. `run_cmd` is otherwise transparent: calls that write
-nothing to stdout should leave the streams inherited.
+inherited streams. On that path the wrapper must name the unset streams
+explicitly, because Plumbum's `run` defaults an unspecified `stdin` to a pipe
+and then drains it, starving the child. Timed foreground calls already take
+that path, so `--timeout` and no-timeout runs behave identically. Pass
+`subprocess.DEVNULL` as `stdout` when a tool writes to stdout that must not
+reach the caller — `polythene pull` does this for `podman pull` and `podman rm`
+so the UUID stays the only line it prints. `run_cmd` is otherwise transparent:
+calls that write nothing to stdout should leave the streams inherited.
 
 ## Development checks
 

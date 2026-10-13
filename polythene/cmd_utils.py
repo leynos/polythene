@@ -99,10 +99,17 @@ def _run_fg_with_overrides(
     ``run`` is the only foreground route that honours explicit stream
     overrides, so calls that pass one arrive here. Unset streams default to
     ``None`` (inherit), which keeps the wrapper as transparent as ``FG``.
+
+    ``stdin`` needs the same default as ``stdout`` and ``stderr``: plumbum's
+    ``LocalMachine._popen`` defaults an unspecified ``stdin`` to ``PIPE``, and
+    ``run_proc`` drains it with ``communicate()`` and no input, so an omitted
+    ``stdin`` would hand the child an immediate EOF instead of the caller's
+    terminal.
     """
     if not isinstance(cmd, SupportsRun):
         msg = "Command does not support timeout execution"
         raise TypeError(msg)
+    run_kwargs.setdefault("stdin", None)
     run_kwargs.setdefault("stdout", None)
     run_kwargs.setdefault("stderr", None)
     from plumbum.commands.processes import (  # pyright: ignore[reportMissingTypeStubs]
