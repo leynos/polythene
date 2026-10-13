@@ -57,7 +57,8 @@ another, how the helper layer resolves the external tools, and how
 
 ```mermaid
 flowchart TD
-    main["__main__.py"] -->|"lazy import"| cli["isolation.py<br/>Cyclopts app"]
+    main["__main__.py"] -->|"lazy import"| init["__init__.py<br/>public surface"]
+    init --> cli["isolation.py<br/>Cyclopts app"]
     cli --> backends["backends.py"]
     cli --> script["script_utils.py"]
     backends --> cmd["cmd_utils.py"]
@@ -99,13 +100,14 @@ the package-level `main(argv)` passes `sys.argv[1:]` to the app. The
 
 Exit codes are few and deliberate:
 
-| Code  | Raised by                       | Condition                                                                  |
-| ----- | ------------------------------- | -------------------------------------------------------------------------- |
-| `1`   | `cmd_exec`                      | The UUID has no directory in the store                                     |
-| `2`   | `cmd_exec`                      | No command tokens were supplied, or `--isolation` names an unknown backend |
-| `2`   | `ensure_exists`, `unique_match` | A required path is missing, or a match is not unique                       |
-| `126` | `cmd_exec`                      | Every isolation backend declined                                           |
-| `127` | `get_command`                   | A required binary, such as `podman`, is not on `PATH`                      |
+| Code  | Raised by                       | Condition                                             |
+| ----- | ------------------------------- | ----------------------------------------------------- |
+| `1`   | `cmd_exec`                      | The UUID has no directory in the store                |
+| `1`   | Cyclopts option validation      | `--isolation` names an unknown backend                |
+| `2`   | `cmd_exec`                      | No command tokens were supplied                       |
+| `2`   | `ensure_exists`, `unique_match` | A required path is missing, or a match is not unique  |
+| `126` | `cmd_exec`                      | Every isolation backend declined                      |
+| `127` | `get_command`                   | A required binary, such as `podman`, is not on `PATH` |
 
 Other statuses are propagated rather than translated in the places that handle
 them: a backend's non-zero status from `cmd_exec`, and an unexpected probe
@@ -149,13 +151,14 @@ not check that the UUID exists — all of that stays with the CLI.
    `ensure_runtime_paths` to create `dev/` and `tmp/`, and the UUID is printed
    to stdout.
 
-The lifetimes are deliberately narrow. The container from step 7 exists only
-for the duration of the export, the image is pulled at most once per `pull`,
-and the persistent artefacts are the exported directory and its metadata file.
-`--timeout` reaches every external command in the flow, so it bounds each
-operation rather than the export as a whole. A collision on the destination
-directory raises `FileExistsError`, which `cmd_pull` answers by generating a
-fresh UUID once and retrying.
+The lifetimes are deliberately narrow. The container from step 7 is removed
+after the export when cleanup succeeds, but cleanup is best-effort: a
+`podman rm` that fails is suppressed, and the container can be left behind. The
+image is pulled at most once per `pull`, and the persistent artefacts are the
+exported directory and its metadata file. `--timeout` reaches every external
+command in the flow, so it bounds each operation rather than the export as a
+whole. A collision on the destination directory raises `FileExistsError`, which
+`cmd_pull` answers by generating a fresh UUID once and retrying.
 
 ### `polythene exec`
 
@@ -176,11 +179,14 @@ fresh UUID once and retrying.
 
 The order walked in step 4 is the registry order — bubblewrap, proot, chroot —
 unless `--isolation` reorders it. The accepted names are `bubblewrap`, `proot`,
-and `chroot`; anything else exits `2` before a probe runs. A requested backend
-is tried first and the remainder follow in registry order, so the preference is
-a reordering rather than an exclusive selection. `chroot` is the only backend
-that sets `requires_root`, and it is skipped when the effective user is not
-root; bubblewrap and proot are never skipped for privilege reasons.
+and `chroot`; anything else is rejected by the option's annotation — Cyclopts
+prints `Invalid value for "--isolation"` and exits `1` — so the
+`except KeyError` branch inside `cmd_exec` is unreachable from the CLI. A
+requested backend is tried first and the remainder follow in registry order, so
+the preference is a reordering rather than an exclusive selection. `chroot` is
+the only backend that sets `requires_root`, and it is skipped when the
+effective user is not root; bubblewrap and proot are never skipped for
+privilege reasons.
 
 ### Backend probes and flags
 
@@ -192,9 +198,10 @@ fallback.
   running anything when the process is not root and
   `/proc/sys/kernel/unprivileged_userns_clone` reads exactly `0`; a missing
   file is not fatal, and an unreadable one is logged and ignored. It then runs
-  `bwrap --unshare-user --uid 0 --gid 0 --bind / / true`. A permission error
-  disables bubblewrap outright; any other failure logs and continues with an
-  empty flag list. A successful probe contributes
+  `bwrap --unshare-user --uid 0 --gid 0 --bind / / true`. A *recognized*
+  permission error — `Permission denied` in the output, or `errno.EPERM` —
+  disables bubblewrap outright; an unrecognized failure logs and continues with
+  an empty flag list. A successful probe contributes
   `--unshare-user --uid 0 --gid 0`, extended with
   `--unshare-pid --unshare-ipc --unshare-uts`. `_probe_bwrap_proc` binds the
   root and tries `--proc /proc`, keeping that flag only if it works. The full
@@ -306,15 +313,15 @@ supplying the step parameters. Adding a scenario therefore means adding a
 
 `tests/conftest.py` exports two fixtures. `run_cli` calls `polythene.app(args)`
 with stdout and stderr redirected and turns the resulting `SystemExit` into an
-exit code. `run_module_cli` runs
-`runpy.run_module ("polythene", run_name="__main__")` with `sys.argv` patched,
-so the module entry point is covered as well; it restores the patch in a
-`finally` block. Both return a `tests.support.cli.CliResult` holding
-`exit_code`, `stdout`, and `stderr`. Those helpers live in `tests/support/`
-rather than in `conftest.py` so every consumer imports the same module object;
-pytest collects `conftest.py` specially, and `from conftest import ...` can
-otherwise create a second, structurally identical copy of a type under some
-import-mode combinations — the problem mutmut's sandbox exposed.
+exit code. `run_module_cli` runs `run_module("polythene", run_name="__main__")`
+with `sys.argv` patched, so the module entry point is covered as well; it
+restores the patch in a `finally` block. Both return a
+`tests.support.cli.CliResult` holding `exit_code`, `stdout`, and `stderr`.
+Those helpers live in `tests/support/` rather than in `conftest.py` so every
+consumer imports the same module object; pytest collects `conftest.py`
+specially, and `from conftest import ...` can otherwise create a second,
+structurally identical copy of a type under some import-mode combinations — the
+problem mutmut's sandbox exposed.
 
 The suite uses no mocking framework: there is no `cmd-mox` and no
 `pytest-mock`, and neither is a declared dependency. Doubles are handwritten
