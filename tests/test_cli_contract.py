@@ -21,7 +21,7 @@ if typ.TYPE_CHECKING:
 
 PARSER_DIAGNOSTIC_STREAM: typ.Literal["stdout", "stderr"] = typ.cast(
     "typ.Literal['stdout', 'stderr']",
-    os.environ.get("POLYTHENE_TEST_DIAGNOSTIC_STREAM", "stdout"),
+    os.environ.get("POLYTHENE_TEST_DIAGNOSTIC_STREAM", "stderr"),
 )
 
 

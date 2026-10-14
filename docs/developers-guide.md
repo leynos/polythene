@@ -87,6 +87,39 @@ reach the caller — `polythene pull` does this for `podman pull` and `podman rm
 so the UUID stays the only line it prints. `run_cmd` is otherwise transparent:
 calls that write nothing to stdout should leave the streams inherited.
 
+## CLI contract tests
+
+The CLI contract tests use `CliResult` to compare exit status and both output
+streams across the in-process app, `python -m polythene`, and the installed
+console script. `assert_cli_diagnostic` checks a non-zero status, normalized
+diagnostic fragments, and an empty other stream. `assert_no_process_launch`
+checks that rejected commands do not print the `$ cmd` launch echo. The
+in-process invalid-isolation case also checks that recording backends receive
+no calls. These helpers deliberately ignore Rich borders and whitespace: assert
+useful diagnostic content, not Rich layout or Cyclopts' exact wording.
+
+To compare a Cyclopts update, use one fixed base containing the contract tests.
+Install its locked dependencies in the control environment:
+
+```shell
+UV_PYTHON=3.13 UV_PROJECT_ENVIRONMENT=.venv-cyclopts3 uv sync --locked --group dev
+```
+
+In a separate worktree, apply only the dependency and lock changes, then
+install the treatment environment:
+
+```shell
+UV_PYTHON=3.13 UV_PROJECT_ENVIRONMENT=.venv-cyclopts4 uv sync --locked
+```
+
+Record each environment's Python patch, Cyclopts, and Rich versions. Run the
+unchanged regression test first; if it fails in the control, stop and record
+that as a baseline issue. Then run `tests/test_cli_contract.py` with
+`POLYTHENE_TEST_DIAGNOSTIC_STREAM=stdout` and again with it set to `stderr` in
+both environments, followed by `uv run --locked pytest -v`. Classify every
+failure against the control and retain the stream, status, and backend-call
+evidence in the change description rather than committing a test artefact.
+
 ## Development checks
 
 Run the standard local checks through the Makefile:

@@ -400,31 +400,6 @@ def test_cmd_exec_reads_isolation_from_environment(
     assert bubblewrap.calls == []
 
 
-def test_cmd_exec_rejects_unknown_isolation(
-    run_cli: typ.Callable[[typ.Sequence[str]], CliResult],
-    tmp_path: Path,
-) -> None:
-    """An unknown isolation backend is reported as a CLI error."""
-    rootfs = tmp_path / "uuid-unknown"
-    rootfs.mkdir()
-
-    result = run_cli(
-        [
-            "exec",
-            "uuid-unknown",
-            "--store",
-            tmp_path.as_posix(),
-            "--isolation",
-            "unknown",  # not one of the registered backends
-            "--",
-            "true",
-        ]
-    )
-
-    assert result.exit_code == 1
-    assert 'Invalid value for "--isolation"' in result.stdout
-
-
 def test_module_exec_accepts_isolation_option(
     run_module_cli: typ.Callable[[typ.Sequence[str]], CliResult],
     tmp_path: Path,

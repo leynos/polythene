@@ -140,6 +140,31 @@ uv run polythene exec <uuid> -- make -C /workspace/tests system
 The `exec` invocation will select the available backend on each host while the
 commands run unchanged.
 
+## Output streams and exit status
+
+Polythene keeps stdout for command results. `pull` writes only the generated
+UUID; `exec` leaves stdout to the child command. Help output goes to stdout and
+exits with status 0.
+
+Parser errors, application errors, verbose logs, notices that a local image is
+being reused, and the `$ cmd` launch echo go to stderr. This keeps diagnostics
+available without adding them to captured command results.
+
+The CLI uses these exit statuses:
+
+| Situation                                                 | Status                          |
+| --------------------------------------------------------- | ------------------------------: |
+| Parser error                                              | Non-zero status set by Cyclopts |
+| `exec` has no command                                     | 2                               |
+| Requested UUID root filesystem is missing                 | 1                               |
+| Unsupported isolation backend in a direct `cmd_exec` call | 2                               |
+| All isolation backends are unavailable                    | 126                             |
+| A child command ran                                       | The child's status              |
+
+`polythene.main(argv)` raises `SystemExit` and does not return a status code.
+`PolytheneSession.run` returns the subprocess status reported by its sandbox
+runner.
+
 ## Environment variables
 
 Polythene recognizes the following environment variables:
