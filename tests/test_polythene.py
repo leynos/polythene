@@ -9,7 +9,7 @@ import pytest
 
 import polythene
 import polythene.isolation as isolation
-from polythene import backends
+from tests.support.backends import _DummyBackend
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -82,30 +82,6 @@ def test_cmd_pull_retries_existing_uuid(
     assert result.exit_code == 0
     assert result.stdout.strip() == "uuid-2"
     assert call_count == 2
-
-
-class _DummyBackend:
-    def __init__(
-        self,
-        exit_code: int | None,
-        *,
-        requires_root: bool = False,
-        name: str = "dummy",
-    ) -> None:
-        self.exit_code = exit_code
-        self.requires_root = requires_root
-        self.name = name
-        self.calls: list[tuple[Path, str, int | None]] = []
-
-    def run(
-        self,
-        root: Path,
-        inner_cmd: str,
-        *,
-        context: backends.BackendContext,
-    ) -> tuple[str, int] | None:
-        self.calls.append((root, inner_cmd, context.timeout))
-        return None if self.exit_code is None else (self.name, self.exit_code)
 
 
 def test_normalize_command_args_flattens_single_sequence() -> None:
