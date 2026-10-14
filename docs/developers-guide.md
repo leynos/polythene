@@ -11,7 +11,8 @@ for the trade-offs behind the current design, see the
 Polythene is a small package arranged in three cooperating layers:
 
 - `isolation.py` owns the Cyclopts application, the `pull` and `exec` commands,
-  the store layout, and the backend registry.
+  the store layout, and the registry *binding* — it holds
+  `BACKENDS = create_backends()`, while `backends.py` constructs the tuple.
 - `backends.py` describes the execution backends — bubblewrap, proot, and
   chroot — as data, together with the probes that decide whether each one can
   run.
@@ -38,10 +39,14 @@ Because those constants are bound at import time, tests patch them by attribute
 (`monkeypatch.setattr(isolation, "BACKENDS", ...)`).
 
 The environment is a second, later input. `app.config` installs
-`cyclopts.config.Env("POLYTHENE_", command=False)`, which binds *every*
-invocation option to `POLYTHENE_<OPTION_NAME>` in upper case — so
+`cyclopts.config.Env("POLYTHENE_", command=False)`, which binds each
+parameter's name to `POLYTHENE_<NAME>` with the name upper-cased and `-` and
+`.` rendered as `_`. Binding is by parameter, not by *option*: a positional
+parameter is matched too, so `POLYTHENE_UUID` supplies the `uuid` that `exec`
+would otherwise take from the command line — the command then errors on its own
+terms (no rootfs for that UUID) rather than for a missing argument.
 `POLYTHENE_TIMEOUT` reaches `--timeout`, and `POLYTHENE_STORE` reaches
-`--store` without the option's own `env_var` being involved. A value that
+`--store`, without the option's own `env_var` being involved. A value that
 cannot be coerced is reported as
 `Invalid value for "POLYTHENE_TIMEOUT" from env`, not as a bad command line.
 `--store` and `--isolation` also declare `env_var` explicitly, which makes the
@@ -53,14 +58,17 @@ two agree for `POLYTHENE_STORE`; the `default` of `--store` is the
 already-resolved `DEFAULT_STORE`, so an unset variable leaves the import-time
 value in place.
 
-`app.end_of_options_delimiter = "--"` is what lets a command token that *looks
-like one of the command's own options* survive. After a bare `--`, Cyclopts
-stops parsing options and passes the remainder through as tokens, so
-`exec UUID -- --timeout notanint echo x` reaches the rootfs while
+A command token that *looks like one of the command's own options* survives
+only because a bare `--` separates it from the outer parser: after the
+delimiter, Cyclopts stops parsing options and passes the remainder through as
+tokens, so `exec UUID -- --timeout notanint echo x` reaches the rootfs while
 `exec UUID --timeout notanint echo x` fails on the coercion of `notanint`. That
-is the form `PolytheneSession` emits, and it is why the delimiter is load
-bearing rather than decorative; `CommandToken`'s `allow_leading_hyphen` covers
-the rest, admitting a hyphen-led token such as `-n` in either form.
+is the form `PolytheneSession` emits. The `--` is load bearing; the
+`app.end_of_options_delimiter = "--"` assignment beside the app is not, because
+`--` is already Cyclopts's default and `App._resolve` falls back to it when
+nothing is set. The assignment records the default rather than enabling it;
+deleting it would not change behaviour. `CommandToken`'s `allow_leading_hyphen`
+covers the rest, admitting a hyphen-led token such as `-n` in either form.
 
 Three terms recur throughout this guide, and are kept distinct:
 
@@ -313,15 +321,15 @@ pytest imports its single module by the bare filename — `test_cv005_wiring`, n
 conventions do not collide; a helper added there would need the package
 treatment the rest of the suite uses.
 
-| Location                                        | Contents                                                                                                                                                              |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/test_*.py`                               | Unit tests for the package modules: the CLI, the backend probes, the image-export contract, the process helpers, the session helper, and the mutation-workflow caller |
-| `tests/features/*.feature`                      | Gherkin scenarios describing CLI, command-execution, and script-utility behaviour                                                                                     |
-| `tests/bdd/test_*_behaviour.py`                 | pytest-bdd step bindings that execute those scenarios                                                                                                                 |
-| `tests/conftest.py`                             | The `run_cli` and `run_module_cli` fixtures                                                                                                                           |
-| `tests/support/`                                | Importable helpers: the `CliResult` type and the recording Podman doubles                                                                                             |
-| `tests/test_workflow_contract.py`               | Contract tests for the mutation-testing caller workflow                                                                                                               |
-| `tests/workflow_contracts/test_cv005_wiring.py` | Contract tests for the CV-005 checker's local wiring                                                                                                                  |
+| Location                                        | Contents                                                                                                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/test_*.py`                               | Unit tests for the package modules: the CLI, the backend probes, the image-export contract, the process helpers, the script-utility helpers, and the session helper |
+| `tests/features/*.feature`                      | Gherkin scenarios describing CLI, command-execution, and script-utility behaviour                                                                                   |
+| `tests/bdd/test_*_behaviour.py`                 | pytest-bdd step bindings that execute those scenarios                                                                                                               |
+| `tests/conftest.py`                             | The `run_cli` and `run_module_cli` fixtures                                                                                                                         |
+| `tests/support/`                                | Importable helpers: the `CliResult` type and the recording Podman doubles                                                                                           |
+| `tests/test_workflow_contract.py`               | Contract tests for the mutation-testing caller workflow                                                                                                             |
+| `tests/workflow_contracts/test_cv005_wiring.py` | Contract tests for the CV-005 checker's local wiring                                                                                                                |
 
 Test bodies call real functions. Where a module shells out, the double replaces
 the resolution point rather than the logic: `tests/support/podman.py` provides
@@ -381,11 +389,13 @@ non-cancelling per-ref concurrency group, the schedule and dispatch triggers,
 and the two `with` values. It deliberately does not assert the SHA value, which
 Dependabot owns.
 
-A contract test is skipped when the file it describes is absent.
 `tests/test_workflow_contract.py` carries a `pytest.mark.skipif` on the
 workflow path, because mutmut's `mutants/` sandbox does not copy `.github/`;
 the reason string in the skip marker says so. Without that guard the sandboxed
-run would fail on a missing file rather than on a real defect.
+run would fail on a missing file rather than on a real defect. That guard is
+local to this module, not a convention the suite follows:
+`tests/workflow_contracts/test_cv005_wiring.py` has no `skipif`, so a missing
+`Makefile` or `ci.yml` makes it fail rather than skip.
 
 The CodeScene contract works the same way but runs locally.
 `make test-workflow-contracts` runs `cv005-contracts check --repository .` from
@@ -430,6 +440,11 @@ inside the working copy.
 | `clean`                   | Remove build artefacts, caches, coverage output, and `.venv`                                                      |
 | `help`                    | List the documented targets                                                                                       |
 
+Four targets take a tool-check prerequisite as well as the one shown: `lint`,
+`fmt`, and `check-fmt` each depend on `ruff`, and `typecheck` depends on `ty`.
+`markdownlint` names `$(MDLINT)`, and `nixie` names `$(NIXIE)`, under the
+conditional membership described above.
+
 `make all` is not the whole gate set. It runs `build`, `check-fmt`, `test`,
 `typecheck`, `spelling`, and `test-workflow-contracts`; `lint`, `markdownlint`,
 and `nixie` are not in it and must be run separately. The full sequence for a
@@ -456,10 +471,17 @@ before it is ever staged.
 `tests` — but no Make target and no CI step invokes it, so it is an editor-time
 setting rather than an enforced gate.
 
-The tool-check targets verify prerequisites and never install them. `TOOLS`
-covers `ruff`, `ty`, `markdownlint-cli2`, `nixie`, and `uv`; `pytest` is
-checked inside the virtual environment with `uv run which`. A missing tool
-fails the target with a message naming it. Beyond that:
+The tool-check targets verify prerequisites and never install them. `pytest` is
+checked inside the virtual environment with `uv run which`, and a missing tool
+normally fails the target with a message naming it. The check is driven by
+`TOOLS`, and membership of that list is itself conditional: `NIXIE` is defined
+as `$(shell which nixie)`, so on a machine without `nixie` the variable expands
+to the empty string and silently drops *out* of `TOOLS`. The `nixie` target
+still declares `$(NIXIE)` as a prerequisite, but with nothing left to expand to
+there is no guard to run, and the target fails on the shell's
+`command not found` instead of on the tool-check's message. `MDLINT` does not
+have this failure mode because it falls back to a fixed `$HOME/.bun/bin/...`
+path rather than to the empty string. Beyond the tool-check:
 
 - `fmt` and `check-fmt` call `mdtablefix` directly and need version 0.6.0 or
   later, the first release with both `--check` and `--git`; CI installs 0.6.1
