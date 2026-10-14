@@ -127,19 +127,20 @@ def run_module_cli(
         stderr_buffer = StringIO()
         exit_code = 0
         argv = ["python -m polythene", *args]
-        monkeypatch.setattr(sys, "argv", list(argv), raising=False)
 
-        try:
-            with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-                run_module("polythene", run_name="__main__")
-        except SystemExit as exc:  # pragma: no cover - exercised in assertions
-            code = exc.code
-            if code is None:
-                exit_code = 0
-            elif isinstance(code, int):
-                exit_code = code
-            else:
-                exit_code = int(code)
+        with monkeypatch.context() as invocation_patch:
+            invocation_patch.setattr(sys, "argv", list(argv), raising=False)
+            try:
+                with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+                    run_module("polythene", run_name="__main__")
+            except SystemExit as exc:  # pragma: no cover - exercised in assertions
+                code = exc.code
+                if code is None:
+                    exit_code = 0
+                elif isinstance(code, int):
+                    exit_code = code
+                else:
+                    exit_code = int(code)
 
         return CliResult(
             exit_code=exit_code,
