@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import typing as typ
 
 import pytest
@@ -15,6 +16,11 @@ if typ.TYPE_CHECKING:
 
 IMAGE = "localhost/example:latest"
 CONTAINER_ID = "0123456789abcdef"
+
+# Only ``podman pull`` and ``podman rm`` write to stdout, so those two calls
+# take the sink that keeps ``polythene pull`` down to the UUID line. Every
+# other call inherits the caller's streams.
+STDOUT_SINK = {"stdout": subprocess.DEVNULL}
 PULL_FAILURE = ProcessExecutionError(
     ["/usr/bin/podman", "pull", IMAGE],
     125,
@@ -70,7 +76,9 @@ def test_export_rootfs_reuses_existing_local_image(
     assert create.fg is False
     assert create.run_kwargs == {}
     assert create.timeout is None
-    assert tools.podman.find("rm")[0].argv == ("podman", "rm", CONTAINER_ID)
+    rm = tools.podman.find("rm")[0]
+    assert rm.argv == ("podman", "rm", CONTAINER_ID)
+    assert rm.run_kwargs == STDOUT_SINK
     assert dest.is_dir()
     assert "pull" not in capsys.readouterr().err
 
@@ -97,7 +105,8 @@ def test_export_rootfs_pulls_when_image_is_absent(
     pull = tools.podman.find("pull")[0]
     assert pull.argv == ("podman", "pull", IMAGE)
     assert pull.fg is True
-    assert pull.run_kwargs == {}
+    assert pull.run_kwargs == STDOUT_SINK
+    assert tools.podman.find("rm")[0].run_kwargs == STDOUT_SINK
     assert dest.is_dir()
 
 
@@ -175,6 +184,30 @@ def test_export_rootfs_forwards_timeout_to_every_podman_call(
     ]
     assert [record.timeout for record in tools.podman.calls] == [30, 30, 30, 30]
     assert tools.podman.find("image", "exists")[0].run_kwargs == {"retcode": None}
+
+
+def test_export_rootfs_silences_pull_and_rm_stdout_with_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The pull path keeps the stdout sink when a timeout is supplied."""
+    tools = install_recording_tools(monkeypatch)
+    tools.podman.script("image", "exists", outcome=(1, "", ""))
+    tools.podman.script("pull", outcome=(0, "", ""))
+    _script_create(tools)
+
+    _run_export(tmp_path, timeout=30)
+
+    assert [record.argv[1] for record in tools.podman.calls] == [
+        "image",
+        "pull",
+        "create",
+        "export",
+        "rm",
+    ]
+    assert [record.timeout for record in tools.podman.calls] == [30, 30, 30, 30, 30]
+    assert tools.podman.find("pull")[0].run_kwargs == STDOUT_SINK
+    assert tools.podman.find("rm")[0].run_kwargs == STDOUT_SINK
 
 
 def test_export_rootfs_uses_one_podman_command_for_probe_and_create(

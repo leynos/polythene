@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import shlex
+import subprocess
 import sys
 import tempfile
 import time
@@ -194,6 +195,12 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
     The image is pulled only when the probe reports it absent from the active
     Podman store; either way the container is created with ``--pull=never``
     against that same store, so ``exec`` stays offline afterwards.
+
+    ``pull`` and ``rm`` report the image and container ID on stdout, so both
+    run with stdout sunk to :data:`subprocess.DEVNULL`. That keeps the caller's
+    stdout free for ``cmd_pull``'s single UUID line, which is the documented
+    contract. Every other step here writes nothing to stdout and inherits the
+    streams unchanged.
     """
     podman = get_command("podman")
     tar = get_command("tar")
@@ -206,7 +213,12 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
     else:
         log(f"Pulling {image} …")
         try:
-            run_cmd(podman["pull", image], fg=True, timeout=timeout)
+            run_cmd(
+                podman["pull", image],
+                fg=True,
+                timeout=timeout,
+                stdout=subprocess.DEVNULL,
+            )
         except ProcessExecutionError as exc:
             _error(f"Failed to pull image {image}: {exc}")
             raise SystemExit(_normalize_retcode(exc.retcode)) from exc
@@ -237,7 +249,12 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
         )
     finally:
         with contextlib.suppress(ProcessExecutionError):
-            run_cmd(podman["rm", cid], fg=True, timeout=timeout)
+            run_cmd(
+                podman["rm", cid],
+                fg=True,
+                timeout=timeout,
+                stdout=subprocess.DEVNULL,
+            )
 
     # Metadata (best-effort, does not affect functionality)
     meta = dest / ".polythene-meta"

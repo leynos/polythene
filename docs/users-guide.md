@@ -68,7 +68,14 @@ The pull command:
 - probes the active Podman store with `podman image exists IMAGE`,
 - pulls the image only when that probe reports it absent,
 - exports the image into a UUID-named root filesystem directory, and
-- prints the generated UUID to stdout for later reuse.
+- prints the generated UUID to stdout for later reuse, as the only line written
+  there.
+
+Podman's progress reporting, image IDs, and container IDs are kept off stdout,
+so `polythene pull` can be captured with `$(...)` without filtering. It works
+the same way with `--timeout` as without it. To see what Polythene and Podman
+are doing, set `POLYTHENE_VERBOSE` (see
+[Environment variables](#environment-variables)) or read stderr.
 
 Because the probe reads local storage rather than a registry, an image you
 built in the same job can be reused without publishing it. The probe and the

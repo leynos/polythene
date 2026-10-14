@@ -182,6 +182,13 @@ not check that the UUID exists — all of that stays with the CLI.
    `ensure_runtime_paths` to create `dev/` and `tmp/`, and the UUID is printed
    to stdout.
 
+Printing the UUID alone is a contract, so steps 5 and 7 sink `podman pull` and
+`podman rm` to `subprocess.DEVNULL`: those two report the image and container
+ID on stdout and would otherwise contaminate it. The `podman create` in step 7
+also writes a container ID to stdout, but there that output is the *intended*
+result rather than noise — it is read back and stripped into `cid`, which is
+why that call stays on the ordinary path.
+
 The lifetimes are deliberately narrow. The container from step 7 is removed
 after the export when cleanup succeeds, but cleanup is best-effort: a
 `podman rm` that fails is suppressed, and the container can be left behind. The
@@ -263,15 +270,32 @@ that any of the three blocks network access.
 invocation or pipeline with `TypeError`, and raises `TimeoutConflictError` when
 a timeout arrives both as an argument and in `**run_kwargs`.
 
+A foreground call normally inherits the caller's streams. It leaves that path
+in two cases: a timeout is set, or the caller passes an explicit `stdin`,
+`stdout`, or `stderr` override. Both route through `_run_fg_with_overrides`,
+which drives `cmd.run(timeout=...)` rather than `FG` — `FG` hard-codes
+inherited streams and so cannot express an override. That helper then names all
+three streams explicitly, defaulting the ones the caller left unset to `None`.
+The `stdin` default is the load-bearing one: plumbum's `_popen` defaults an
+unspecified `stdin` to a pipe and `run_proc` drains it with `communicate()`, so
+omitting it would hand the child an immediate EOF instead of the caller's
+terminal. Because a timed call already takes this path, a `--timeout` run and a
+no-timeout run behave identically.
+
+Stream overrides exist for callers that must keep a chatty tool off their own
+streams. `polythene pull` passes `stdout=subprocess.DEVNULL` for `podman pull`
+and `podman rm`, so the UUID stays the only line it prints. Everything else in
+the package inherits the streams unchanged.
+
 Timeout translation is confined to the foreground path. When `fg=True` and a
-timeout is set, the call runs under `cmd.run(timeout=...)` and plumbum's
-`ProcessTimedOut` is re-raised as the builtin `TimeoutError`. The
-non-foreground path forwards the timeout to `cmd.run` without that `except`
-clause, so a non-foreground call that times out — the `podman image exists`
-probe and `podman create` in `export_rootfs` are the two in this package —
-raises `ProcessTimedOut` to its caller rather than `TimeoutError`.
-`ProcessTimedOut` derives from `Exception`, not `ProcessExecutionError`, so the
-surrounding `except ProcessExecutionError` handlers do not catch it.
+timeout is set, plumbum's `ProcessTimedOut` is re-raised as the builtin
+`TimeoutError`. The non-foreground path forwards the timeout to `cmd.run`
+without that `except` clause, so a non-foreground call that times out — the
+`podman image exists` probe and `podman create` in `export_rootfs` are the two
+in this package — raises `ProcessTimedOut` to its caller rather than
+`TimeoutError`. `ProcessTimedOut` derives from `Exception`, not
+`ProcessExecutionError`, so the surrounding `except ProcessExecutionError`
+handlers do not catch it.
 
 The `timeout` value travels with each operation rather than the invocation: in
 `pull` it reaches the probe, the pull, `create`, the export, and `rm`, and in
