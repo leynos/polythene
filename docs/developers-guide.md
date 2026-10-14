@@ -35,10 +35,32 @@ a command runs:
   with `os.environ.setdefault`, so an inherited value wins.
 
 Because those constants are bound at import time, tests patch them by attribute
-(`monkeypatch.setattr(isolation, "BACKENDS", ...)`). The `--store` and
-`--isolation` options additionally declare `env_var`, so Cyclopts re-reads
-`POLYTHENE_STORE` and `POLYTHENE_ISOLATION` on each invocation and a value set
-after import still reaches the command.
+(`monkeypatch.setattr(isolation, "BACKENDS", ...)`).
+
+The environment is a second, later input. `app.config` installs
+`cyclopts.config.Env("POLYTHENE_", command=False)`, which binds *every*
+invocation option to `POLYTHENE_<OPTION_NAME>` in upper case — so
+`POLYTHENE_TIMEOUT` reaches `--timeout`, and `POLYTHENE_STORE` reaches
+`--store` without the option's own `env_var` being involved. A value that
+cannot be coerced is reported as
+`Invalid value for "POLYTHENE_TIMEOUT" from env`, not as a bad command line.
+`--store` and `--isolation` also declare `env_var` explicitly, which makes the
+binding legible at the option rather than only in the app's configuration.
+
+Both routes are read afresh on each invocation, so a variable set after import
+still reaches the command even though `DEFAULT_STORE` was fixed at import. The
+two agree for `POLYTHENE_STORE`; the `default` of `--store` is the
+already-resolved `DEFAULT_STORE`, so an unset variable leaves the import-time
+value in place.
+
+`app.end_of_options_delimiter = "--"` is what lets a command token that *looks
+like one of the command's own options* survive. After a bare `--`, Cyclopts
+stops parsing options and passes the remainder through as tokens, so
+`exec UUID -- --timeout notanint echo x` reaches the rootfs while
+`exec UUID --timeout notanint echo x` fails on the coercion of `notanint`. That
+is the form `PolytheneSession` emits, and it is why the delimiter is load
+bearing rather than decorative; `CommandToken`'s `allow_leading_hyphen` covers
+the rest, admitting a hyphen-led token such as `-n` in either form.
 
 Three terms recur throughout this guide, and are kept distinct:
 
