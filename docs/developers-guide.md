@@ -228,9 +228,10 @@ privilege reasons.
 
 ### Backend probes and flags
 
-Each backend runs a cheap probe before the real command and declines by
-returning `None` rather than raising, which is what drives the availability
-fallback.
+Each backend resolves its binary before running any probe: a `SystemExit` from
+`get_command` is logged and the backend declines with `None` without probing at
+all. Probes otherwise run before the real command and decline by returning
+`None` rather than raising, which is what drives the availability fallback.
 
 - **bubblewrap** (`bwrap`). `_probe_bwrap_userns` short-circuits without
   running anything when the process is not root and
@@ -266,9 +267,11 @@ that any of the three blocks network access.
 ### Process execution
 
 `run_cmd` is the single place that starts an external command. It echoes
-`$ <command>` to stderr before running, rejects anything that is not a plumbum
-invocation or pipeline with `TypeError`, and raises `TimeoutConflictError` when
-a timeout arrives both as an argument and in `**run_kwargs`.
+`$ <command>` to stderr before running, requires the runtime-checkable
+`SupportsFormulate` protocol — an object exposing `formulate()` and
+`__call__()` — rejecting anything else with `TypeError`, and raises
+`TimeoutConflictError` when a timeout arrives both as an argument and in
+`**run_kwargs`.
 
 A foreground call normally inherits the caller's streams. It leaves that path
 in two cases: a timeout is set, or the caller passes an explicit `stdin`,
