@@ -119,6 +119,15 @@ that as a baseline issue. Then run `tests/test_cli_contract.py` with
 both environments, followed by `uv run --locked pytest -v`. Classify every
 failure against the control and retain the stream, status, and backend-call
 evidence in the change description rather than committing a test artefact.
+Repeat the matching `UV_PROJECT_ENVIRONMENT` setting on every `uv run` command;
+the setting used by `uv sync` applies only to that command. For example, run
+the treatment checks with:
+
+```shell
+UV_PROJECT_ENVIRONMENT=.venv-cyclopts4 uv run --locked pytest -v
+```
+
+Use `.venv-cyclopts3` for control checks.
 
 ## Development checks
 

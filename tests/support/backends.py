@@ -18,6 +18,7 @@ class _DummyBackend:
         requires_root: bool = False,
         name: str = "dummy",
     ) -> None:
+        """Initialise the configured result and an empty call log."""
         self.exit_code = exit_code
         self.requires_root = requires_root
         self.name = name
@@ -30,5 +31,6 @@ class _DummyBackend:
         *,
         context: backends.BackendContext,
     ) -> tuple[str, int] | None:
+        """Record the invocation and return the configured result."""
         self.calls.append((root, inner_cmd, context.timeout))
         return None if self.exit_code is None else (self.name, self.exit_code)

@@ -116,6 +116,7 @@ def run_cli(
     _set_deterministic_terminal(monkeypatch)
 
     def _invoke(args: typ.Sequence[str]) -> CliResult:
+        """Invoke the in-process app with deterministic terminal settings."""
         return _capture_cli_result(lambda: polythene.app(list(args)))
 
     return _invoke
@@ -129,6 +130,7 @@ def run_module_cli(
     _set_deterministic_terminal(monkeypatch)
 
     def _invoke(args: typ.Sequence[str]) -> CliResult:
+        """Invoke the module entry point with a scoped argv value."""
         argv = ["python -m polythene", *args]
 
         with monkeypatch.context() as invocation_patch:
@@ -148,6 +150,7 @@ def run_module_cli_process(
     environment = _subprocess_environment(tmp_path / "empty-bin")
 
     def _invoke(args: typ.Sequence[str]) -> CliResult:
+        """Run the module entry point in a sanitised child process."""
         return _run_process([sys.executable, "-m", "polythene", *args], environment)
 
     return _invoke
@@ -168,6 +171,7 @@ def run_console_script_cli(
     environment = _subprocess_environment(tmp_path / "empty-bin")
 
     def _invoke(args: typ.Sequence[str]) -> CliResult:
+        """Run the installed console script in a sanitised child process."""
         return _run_process([script_path.as_posix(), *args], environment)
 
     return _invoke

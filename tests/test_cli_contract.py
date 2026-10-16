@@ -160,6 +160,7 @@ def test_stubbed_pull_prints_only_its_uuid(
         *,
         timeout: int | None = None,
     ) -> None:
+        """Create the requested rootfs directory instead of exporting it."""
         destination.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(isolation, "export_rootfs", _fake_export)
