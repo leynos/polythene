@@ -83,6 +83,31 @@ def _run_process(command: list[str], environment: dict[str, str]) -> CliResult:
     )
 
 
+def _capture_cli_result(invoke: typ.Callable[[], object]) -> CliResult:
+    """Capture CLI output and translate its process-style exit signal."""
+    stdout_buffer = StringIO()
+    stderr_buffer = StringIO()
+    exit_code = 0
+
+    try:
+        with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+            invoke()
+    except SystemExit as exc:  # pragma: no cover - exercised in assertions
+        code = exc.code
+        if code is None:
+            exit_code = 0
+        elif isinstance(code, int):
+            exit_code = code
+        else:
+            exit_code = int(code)
+
+    return CliResult(
+        exit_code=exit_code,
+        stdout=stdout_buffer.getvalue(),
+        stderr=stderr_buffer.getvalue(),
+    )
+
+
 @pytest.fixture
 def run_cli(
     monkeypatch: pytest.MonkeyPatch,
@@ -91,26 +116,7 @@ def run_cli(
     _set_deterministic_terminal(monkeypatch)
 
     def _invoke(args: typ.Sequence[str]) -> CliResult:
-        stdout_buffer = StringIO()
-        stderr_buffer = StringIO()
-        exit_code = 0
-
-        try:
-            with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-                polythene.app(list(args))
-        except SystemExit as exc:  # pragma: no cover - exercised in assertions
-            code = exc.code
-            if code is None:
-                exit_code = 0
-            elif isinstance(code, int):
-                exit_code = code
-            else:
-                exit_code = int(code)
-        return CliResult(
-            exit_code=exit_code,
-            stdout=stdout_buffer.getvalue(),
-            stderr=stderr_buffer.getvalue(),
-        )
+        return _capture_cli_result(lambda: polythene.app(list(args)))
 
     return _invoke
 
@@ -123,30 +129,13 @@ def run_module_cli(
     _set_deterministic_terminal(monkeypatch)
 
     def _invoke(args: typ.Sequence[str]) -> CliResult:
-        stdout_buffer = StringIO()
-        stderr_buffer = StringIO()
-        exit_code = 0
         argv = ["python -m polythene", *args]
 
         with monkeypatch.context() as invocation_patch:
             invocation_patch.setattr(sys, "argv", list(argv), raising=False)
-            try:
-                with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-                    run_module("polythene", run_name="__main__")
-            except SystemExit as exc:  # pragma: no cover - exercised in assertions
-                code = exc.code
-                if code is None:
-                    exit_code = 0
-                elif isinstance(code, int):
-                    exit_code = code
-                else:
-                    exit_code = int(code)
-
-        return CliResult(
-            exit_code=exit_code,
-            stdout=stdout_buffer.getvalue(),
-            stderr=stderr_buffer.getvalue(),
-        )
+            return _capture_cli_result(
+                lambda: run_module("polythene", run_name="__main__")
+            )
 
     return _invoke
 
