@@ -36,10 +36,6 @@ VERBOSE = bool(os.environ.get("POLYTHENE_VERBOSE"))
 
 IS_ROOT = os.geteuid() == 0
 
-# Make Podman as “quiet and simple” as possible for nested/sandboxed execution.
-os.environ.setdefault("CONTAINERS_STORAGE_DRIVER", "vfs")
-os.environ.setdefault("CONTAINERS_EVENTS_BACKEND", "file")
-
 app = App()
 app.help = "polythene — Temu podman for Codex"
 app.config = (cyclopts.config.Env("POLYTHENE_", command=False),)
