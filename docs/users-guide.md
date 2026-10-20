@@ -14,8 +14,29 @@ development and continuous integration (CI).
 
 ## Installation workflow
 
-Polythene uses [uv](https://github.com/astral-sh/uv) to manage Python
-dependencies. Run the bundled Makefile targets from the repository root:
+Polythene is published to PyPI as the `polythene-isolate` distribution. Install
+it with [uv](https://github.com/astral-sh/uv):
+
+```shell
+uv tool install polythene-isolate
+# or
+uv add polythene-isolate
+```
+
+The distribution name differs from the command it installs. The import package
+is `polythene` and the console script is `polythene`, so after installation:
+
+```shell
+polythene --help
+python -m polythene --help
+```
+
+Both forms behave identically. The `polythene-isolate` name on PyPI is only the
+name the project is published under.
+
+To work on Polythene itself, install from a checkout instead. The project uses
+[uv](https://github.com/astral-sh/uv) to manage Python dependencies, and the
+bundled Makefile targets run from the repository root:
 
 ```shell
 make build

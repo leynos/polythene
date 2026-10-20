@@ -42,9 +42,18 @@ privileged `chroot` if they are present.
 
 ## Installation
 
-The repository ships with a Makefile that builds a virtual environment via
-[uv](https://github.com/astral-sh/uv). Install the tooling and project
-dependencies with:
+Polythene is published to PyPI as `polythene-isolate`. Install it with
+[uv](https://github.com/astral-sh/uv):
+
+```shell
+uv tool install polythene-isolate
+```
+
+The distribution name differs from the command it installs: the import package
+and the console script are both `polythene`.
+
+To work on the project itself, the repository ships with a Makefile that builds
+a virtual environment via uv. Install the tooling and project dependencies with:
 
 ```shell
 make build

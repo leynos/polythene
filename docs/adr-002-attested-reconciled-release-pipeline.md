@@ -1,0 +1,252 @@
+# Architectural decision record (ADR) 002: Attested, reconciled release pipeline
+
+## Status
+
+Accepted, 2026-10-20. polythene publishes its sdist and wheel to PyPI as
+`polythene-isolate` and attaches the same bytes to the tag's GitHub Release,
+reconciling the two destinations per filename so a repeated tag uploads nothing.
+
+## Date
+
+2026-10-20.
+
+## Context and problem statement
+
+The previous `release.yml` built a wheel, uploaded it to the tag's GitHub
+Release with `--clobber`, and did not publish to PyPI at all. The repository
+now publishes `polythene-isolate` to PyPI through Trusted Publishing, and two
+constraints make a single linear job insufficient:
+
+- A rebuilt artefact is not guaranteed to be byte-identical to an earlier
+  build, so a re-pushed tag cannot assume that a second build of
+  `polythene_isolate-<version>-py3-none-any.whl` or
+  `polythene_isolate-<version>.tar.gz` matches the first.
+- PyPI refuses a second upload of an existing filename, and the pipeline must
+  never overwrite a GitHub Release asset either. Both destinations are meant to
+  hold exactly the bytes a consumer may already have fetched and verified.
+
+The `--clobber` upload made a re-run cheap, but it broke the invariant that a
+downloaded artefact's digest never changes under a fixed filename, and it could
+silently replace an asset that an earlier run's attestation described.
+
+The pipeline was also the point where the distribution name had to be settled:
+the import package stays `polythene` and the console script stays `polythene`,
+but the distribution published to PyPI is `polythene-isolate`, because the name
+`polythene` on PyPI is not this project's to claim.
+
+## Decision drivers
+
+- No artefact may be silently replaced once published.
+- A re-pushed tag must be safe to run again without manual cleanup, except when
+  the destinations already disagree, which must fail loudly.
+- The job holding the PyPI Trusted Publishing credential must resolve no
+  third-party code and hold no other token.
+- Each job's permissions must be the minimum needed for its own steps.
+- Every release must include a source distribution, because the wheel is built
+  from it and consumers need to rebuild from source.
+- Publication must be observable after the fact without adding an external
+  telemetry service.
+
+## Options considered
+
+1. **Keep the `--clobber` upload and add a plain `uv publish`.** Simple, but an
+   interrupted or re-run workflow can replace a previously published asset with
+   different bytes under the same filename, defeating the provenance an earlier
+   run's attestation described.
+2. **Fail the whole workflow whenever a tag has already published anything.**
+   Safe, but a partially completed run (for example, PyPI succeeded and the
+   GitHub Release upload did not) would need manual recovery for every
+   artefact, not only the ones that actually disagree.
+3. **Reconcile per filename, with a fixed precedence and no overwrites**
+   (chosen). Each filename's canonical bytes are decided once, from whichever
+   destination already holds it; each destination is sent only the names it
+   lacks; and the workflow fails only when the destinations already disagree on
+   a name, which needs a human to remove the offending asset.
+
+## Decision outcome
+
+Adopt per-filename reconciliation with least-privilege jobs, with
+`permissions: {}` at the workflow's top level so no job inherits a scope it did
+not declare.
+
+### Jobs
+
+- `check-version` (`contents: read`) compares the tag with `pyproject.toml`.
+  The tag carries the `v` the declared version does not, so the step strips it
+  with `${TAG#v}` in Bash and `scripts/release_version.py` compares the rest as
+  an exact string: `v0.2.0-beta1` matches `0.2.0-beta1`, and any other spelling
+  fails. The job reports whether the version is a pre-release, and every job
+  that attests, uploads, or releases waits on it.
+- `build-wheels` (`contents: read`) checks the repository out and runs the
+  local `pure-python-wheel` composite action. A plain `uv build` builds the
+  sdist first and the wheel from that sdist, so every release also proves the
+  sdist is buildable, and both files are uploaded as the `wheels-pure` artefact.
+- `attest` (`contents: read`, `id-token: write`, `attestations: write`; needs
+  `check-version`, `build-wheels`) collects every wheel and exactly one sdist,
+  refuses a run that produced none or more than one, and attests all of them
+  with `actions/attest-build-provenance`. It keeps the Sigstore bundle under
+  the run-unique name `polythene-<tag>-run<run_id>-<attempt>.sigstore.json`, so
+  a later run never collides with an earlier one, and hands the files and the
+  bundle on as the `release-dist` artefact. Bytes a later job carries over from
+  an earlier run were attested by that run, and every run's bundle is retained.
+- `draft-release` (`contents: write`; needs `check-version`, `attest`) creates
+  the tag's GitHub Release as a draft, or reuses it if one already exists, and
+  snapshots its current assets. It downloads GitHub's bytes for the names this
+  run also built and hands them on as the `release-github-state` artefact,
+  because a draft release is visible only to a token that can write contents,
+  and `publish-pypi` must not hold one.
+- `publish-pypi` (the `pypi` environment; `contents: read` for a sparse
+  checkout of `scripts/`, plus `id-token: write`; needs `attest`,
+  `draft-release`) holds no GitHub token. It reads PyPI's JSON Simple index and
+  stages only the filenames PyPI does not already list, using GitHub's
+  carried-over bytes when GitHub already has a name this run rebuilt. It
+  uploads the remainder with `pypa/gh-action-pypi-publish` and
+  `skip-existing: true`, and skips the upload step entirely when nothing
+  remains.
+- `publish-release` (`contents: write`; needs `check-version`, `draft-release`,
+  `publish-pypi`) uploads to the GitHub Release the names it lacks, taking
+  PyPI's bytes through the index's `files[].url` and checking them against
+  `files[].hashes.sha256`; uploads the run's Sigstore bundle; verifies that
+  every name carries the same SHA-256 on PyPI and on GitHub and that the bundle
+  is attached; and only then un-drafts the release, with `--prerelease` set
+  from the version check.
+
+### Reconciliation and precedence
+
+`scripts/release_assets.py` decides, once per filename, which destination's
+bytes are canonical: PyPI's, if PyPI already has the name; otherwise the GitHub
+Release's, if it already has the name; otherwise this run's freshly built and
+attested file. Each destination then receives only the names it still lacks.
+There is no `--clobber` anywhere in the workflow: nothing is ever overwritten.
+`scripts/release_assets_cli.py` wraps this library in the `argparse` interface
+`release.yml` calls; the library itself declares no command line.
+
+### No-overwrite verification and manual recovery
+
+Before `publish-release` un-drafts the release, it re-reads both the PyPI index
+and the release's asset list and confirms every artefact name has an identical
+SHA-256 digest on both sides, and that the run's Sigstore bundle is attached. A
+name that already differs between the destinations makes `publish-release` fail
+and the release stays a draft. Recovery is deliberately manual: an
+administrator must delete the offending asset from the GitHub Release (PyPI's
+published files can never be deleted) so that a later run's reconciliation can
+proceed without ambiguity.
+
+### The `pypi` environment and Trusted Publishing
+
+`publish-pypi` runs under the `pypi` GitHub environment, which is restricted to
+tags matching `v*.*.*`, and holds only `contents: read` and `id-token: write`.
+It never receives `contents: write`, so it cannot itself create, edit, or
+upload to the GitHub Release; that stays entirely in `draft-release` and
+`publish-release`. PyPI's Trusted Publisher for the `polythene-isolate` project
+names owner `leynos`, repository `polythene`, workflow `release.yml`, and
+environment `pypi`, so an upload from any other workflow or environment is
+refused. Both settings are prerequisites of the first tag and are recorded in
+the [developer guide](developers-guide.md#publishing-a-release).
+
+### The Simple index lookup
+
+The PyPI JSON Simple index is read with an explicit bounded retry loop of at
+most six attempts, on a network failure, `429`, or a `5xx` status, because the
+runner's `curl` cannot report `%{num_retries}`; the loop counts its own
+attempts. A `404` means the project does not exist yet and is read as an empty
+index; any other non-200 status fails the run rather than guessing.
+
+### Attestations
+
+`attest` generates a build provenance attestation for every wheel and the
+sdist. PyPI's Trusted Publishing flow, through `pypa/gh-action-pypi-publish`,
+separately signs and uploads a PEP 740 attestation for each file it accepts.
+Both are kept: the build provenance attestation covers the run that produced
+the bytes, wherever they end up, while the PEP 740 attestation is PyPI's own
+record for its index.
+
+### Sdist cardinality on every pull request
+
+The release publishes whichever single `.tar.gz` sits beside the wheel, so a
+build that produced none, or two, must fail before tag time. `ci.yml` runs the
+same composite action in its own `wheel-build` job and then fails the job
+unless exactly one sdist and exactly one wheel are present. The check is a
+small Bash step over the built directory, exercised by
+`tests/test_ci_wheel_build.py` against zero, one, and two candidate files.
+
+### No telemetry action
+
+cuprum's release pipeline writes a bounded JSONL record per phase through a
+local `release-telemetry` composite action. polythene drops it. The pipeline
+has no metric consumer, the records would duplicate what the Actions run log
+and the two destinations already show, and the action would be a fifth local
+action to review and pin against a release path that must stay small. GitHub's
+own run history and the attestation store remain the record of what each run
+did; `tests/test_release_workflow_contract.py` fails if the action is
+reintroduced.
+
+### Stdlib-only release scripts
+
+`scripts/release_assets_cli.py` wraps the importable reconciliation library
+`scripts/release_assets.py`, and `scripts/release_version.py` compares the tag
+with the manifest. All three modules use only the Python standard library, not
+Cyclopts or Plumbum, and the entry points run under the runner's preinstalled
+`python3` rather than through `uv run`. This is a deliberate, documented
+exception to [scripting standards](scripting-standards.md): `publish-pypi`
+holds the PyPI OpenID Connect (OIDC) credential and must not resolve any
+third-party package while that credential is live. Every network call these
+scripts might otherwise make stays in the workflow's own `curl` and `gh` steps,
+which the scripts only plan for.
+
+### Workflow hardening
+
+Every action is pinned by commit SHA and every checkout sets
+`persist-credentials: false`. `concurrency` queues a re-pushed tag behind the
+running release with `cancel-in-progress: false`, so a queued run starts from a
+complete state rather than finding one destination holding only some of a
+cancelled run's names. Every value that reaches a `run:` script does so through
+an `env:` entry, as a quoted variable under `set -euo pipefail`;
+`tests/test_release_workflow_contract.py` scans every `run` in every workflow
+and composite action for a pasted `${{ }}` expression, with one reviewed
+exception the shared CV-005 `token.check-step` rule requires.
+
+The composite action's output directory is fixed at `dist` rather than an
+input. The shared CV-005 `coverage.lane-hardening` rule reads every
+`upload-artifact` path reachable from a pull request, and a caller-supplied
+directory cannot be shown to stay outside a coverage lane's workspace, so the
+rule would refuse the action once `ci.yml` began calling it.
+
+## Consequences
+
+- A re-pushed tag is safe to run again: every destination converges on the same
+  bytes per filename, and a complete second run uploads nothing.
+- A name that already differs between PyPI and the GitHub Release blocks
+  `publish-release` and requires a manual GitHub Release asset deletion. This
+  is intentional friction rather than an oversight.
+- `publish-pypi` never holds a GitHub token, and no job other than
+  `draft-release` and `publish-release` can write to the release.
+- The distribution is `polythene-isolate` on PyPI while the import package and
+  console script remain `polythene`; the name change is confined to packaging
+  metadata and the release workflow.
+- The release library and its entry points diverge from the repository's
+  Cyclopts-and-Plumbum scripting baseline, confined to modules that run only
+  inside `release.yml`, immediately before or alongside the PyPI credential's
+  use.
+- Publication has no telemetry beyond GitHub's run history and the attestation
+  store.
+
+## Known risks and limitations
+
+- The reconciliation logic is a single point of failure for correctness: a
+  defect in `scripts/release_assets.py`'s precedence could choose the wrong
+  canonical source. This is mitigated by `tests/test_release_publish_steps.py`,
+  `tests/test_release_github_steps.py`, `tests/test_release_reconciliation.py`,
+  and `tests/test_release_workflow_contract.py`, which run the scripts against
+  scratch directories and recording `gh` and `curl` stand-ins, and pin the job
+  scopes, environment, concurrency, ordering, and pinned actions.
+- The PyPI Simple index is treated as the source of truth for what PyPI already
+  holds; an index outage that returns a non-404, non-2xx status fails the phase
+  rather than guessing, which is deliberate but means a PyPI-side incident can
+  block a release until it resolves.
+- The GitHub `pypi` environment and the PyPI Trusted Publisher are repository
+  settings, not code. A release tagged before both exist fails at the upload
+  step, which is the intended, loud failure.
+- polythene builds one pure Python wheel, so cross-platform wheel matrices are
+  out of scope for this pipeline; the sdist is the artefact that covers other
+  platforms.
