@@ -101,3 +101,41 @@ jobs:
           pytest-workers: ''
           with-ratchet: 'true'
           publish-artefact: 'false'
+
+  # The release publishes this build's sdist alongside its wheel, so a pull
+  # request that produced none, or two, must fail here rather than at tag
+  # time. The same composite action and cardinality check run in release.yml.
+  wheel-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/pure-python-wheel
+        with:
+          python-version: '3.13'
+          artifact-name: wheels-pure
+      - name: Require exactly one sdist to travel with the wheel
+        shell: bash
+        env:
+          WHEEL_DIR: dist
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sdists=("${WHEEL_DIR}"/*.tar.gz)
+          wheels=("${WHEEL_DIR}"/*.whl)
+          if [ "${#sdists[@]}" -ne 1 ]; then
+            echo "Expected exactly one source distribution." >&2
+            echo "Matched: ${sdists[*]:-<none>}" >&2
+            ls -al "${WHEEL_DIR}" >&2
+            exit 1
+          fi
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "Expected exactly one pure Python wheel." >&2
+            echo "Matched: ${wheels[*]:-<none>}" >&2
+            exit 1
+          fi
