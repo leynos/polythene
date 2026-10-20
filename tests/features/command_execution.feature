@@ -15,4 +15,4 @@ Feature: Running external commands
 
   Scenario: Rejecting an invalid command object
     When I execute run_cmd with an invalid command object
-    Then run_cmd raises a TypeError containing "plumbum invocation or pipeline"
+    Then run_cmd raises a TypeError containing "must satisfy SupportsFormulate"
