@@ -125,12 +125,16 @@ There is no `--clobber` anywhere in the workflow: nothing is ever overwritten.
 
 Before `publish-release` un-drafts the release, it re-reads both the PyPI index
 and the release's asset list and confirms every artefact name has an identical
-SHA-256 digest on both sides, and that the run's Sigstore bundle is attached. A
-name that already differs between the destinations makes `publish-release` fail
-and the release stays a draft. Recovery is deliberately manual: an
-administrator must delete the offending asset from the GitHub Release (PyPI's
-published files can never be deleted) so that a later run's reconciliation can
-proceed without ambiguity.
+SHA-256 digest on both sides, and that the run's Sigstore bundle is attached.
+The PyPI index is fetched a second time immediately before the check rather
+than reused from the start of the job, because PyPI serves it through a CDN
+cache that can still omit a file `publish-pypi` has just uploaded; reusing the
+earlier copy would report that file as missing from PyPI and leave the release
+a draft. A name that already differs between the destinations makes
+`publish-release` fail and the release stays a draft. Recovery is deliberately
+manual: an administrator must delete the offending asset from the GitHub
+Release (PyPI's published files can never be deleted) so that a later run's
+reconciliation can proceed without ambiguity.
 
 ### The `pypi` environment and Trusted Publishing
 

@@ -11,6 +11,7 @@ taken from PyPI first, then GitHub, then this run, and nothing is replaced.
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 import typing as typ
@@ -96,6 +97,9 @@ def _publish_release(fake: FakeRelease, *, verify: bool = True) -> pth.Path:
         _step("publish-release", name, cwd, env)
     if outputs(cwd / "output")["pending"] == "true":
         _step("publish-release", "Upload the assets the release lacks", cwd, env)
+    # The index is re-read after the upload, so the digest check sees PyPI's
+    # state now rather than the copy fetched before anything was published.
+    _step("publish-release", "Re-fetch the PyPI index", cwd, env)
     if verify:
         _step(
             "publish-release", "Check both destinations hold the same bytes", cwd, env
@@ -195,6 +199,27 @@ def test_bytes_that_do_not_match_the_index_are_never_uploaded(
     assert completed.returncode != 0, "a download must match PyPI's digest"
     assert _PYPI_ONLY in completed.stderr
     assert _PYPI_ONLY not in _holdings(fake.github)
+
+
+def test_the_index_is_read_again_after_the_upload(fake: FakeRelease) -> None:
+    """The digest check reads PyPI's state after the upload, not before it.
+
+    PyPI serves the Simple index through a CDN cache, so the copy fetched at
+    the start of ``publish-release`` can still omit a file ``publish-pypi``
+    has just published. The re-fetch replaces that copy before the check
+    compares the two destinations.
+    """
+    _draft_and_publish_pypi(fake)
+    cwd, env = _job_directory(fake, "publish-release")
+    stale = json.dumps({"name": "polythene-isolate", "files": []})
+    (cwd / "pypi-index.json").write_text(stale, encoding="utf-8")
+
+    _step("publish-release", "Re-fetch the PyPI index", cwd, env)
+
+    listed = json.loads((cwd / "pypi-index.json").read_text(encoding="utf-8"))
+    assert {entry["filename"] for entry in listed["files"]} == set(_ARTEFACTS), (
+        "the re-fetch must replace a pre-upload copy of the index"
+    )
 
 
 def test_pypi_downloads_retry_and_are_bounded(fake: FakeRelease) -> None:

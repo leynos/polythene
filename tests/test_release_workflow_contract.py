@@ -199,9 +199,11 @@ def test_the_release_is_published_only_after_pypi() -> None:
     )
     names = [item.get("name") for item in _job("publish-release")["steps"]]
     upload = names.index("Upload the assets the release lacks")
+    refetch = names.index("Re-fetch the PyPI index")
     check = names.index("Check both destinations hold the same bytes")
-    assert upload < check < names.index("Publish the GitHub Release"), (
-        "the digests must be compared after the upload and before the release"
+    assert upload < refetch < check < names.index("Publish the GitHub Release"), (
+        "PyPI is re-read after the upload, so the digest check sees what the "
+        "upload published, and both are compared before the release"
     )
     assert "--draft=false" in step_script(
         "publish-release", "Publish the GitHub Release"

@@ -315,6 +315,13 @@ jobs:
         run: |
           set -euo pipefail
           gh release upload "${GITHUB_REF_NAME}" github-upload/*
+      # The digest check compares what PyPI holds *now*, not what it held
+      # before this run's upload: PyPI serves the index through a CDN cache,
+      # so the copy fetched above can still omit a file `publish-pypi` has
+      # just published.
+      - name: Re-fetch the PyPI index
+        id: index-final
+        run: *fetch-index
       - name: Check both destinations hold the same bytes
         id: verify
         run: |
