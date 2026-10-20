@@ -59,11 +59,27 @@ def test_export_rootfs_reuses_existing_local_image(
     dest = _run_export(tmp_path)
 
     assert tools.requested == ["podman", "tar"]
-    assert [record.argv[1] for record in tools.podman.calls] == [
-        "image",
-        "create",
-        "export",
-        "rm",
+    # No global --storage-driver or --events-backend flags are added.
+    assert [record.argv for record in tools.podman.calls] == [
+        ("podman", "image", "exists", IMAGE),
+        ("podman", "create", "--pull=never", IMAGE, "true"),
+        (
+            "podman",
+            "export",
+            CONTAINER_ID,
+            "|",
+            "tar",
+            "-C",
+            str(dest),
+            "-x",
+        ),
+        ("podman", "rm", CONTAINER_ID),
+    ]
+    assert [record.run_kwargs for record in tools.podman.calls] == [
+        {"retcode": None},
+        {},
+        {},
+        STDOUT_SINK,
     ]
     assert tools.podman.find("image", "exists")[0].argv == (
         "podman",
@@ -95,12 +111,28 @@ def test_export_rootfs_pulls_when_image_is_absent(
 
     dest = _run_export(tmp_path)
 
-    assert [record.argv[1] for record in tools.podman.calls] == [
-        "image",
-        "pull",
-        "create",
-        "export",
-        "rm",
+    assert [record.argv for record in tools.podman.calls] == [
+        ("podman", "image", "exists", IMAGE),
+        ("podman", "pull", IMAGE),
+        ("podman", "create", "--pull=never", IMAGE, "true"),
+        (
+            "podman",
+            "export",
+            CONTAINER_ID,
+            "|",
+            "tar",
+            "-C",
+            str(dest),
+            "-x",
+        ),
+        ("podman", "rm", CONTAINER_ID),
+    ]
+    assert [record.run_kwargs for record in tools.podman.calls] == [
+        {"retcode": None},
+        STDOUT_SINK,
+        {},
+        {},
+        STDOUT_SINK,
     ]
     pull = tools.podman.find("pull")[0]
     assert pull.argv == ("podman", "pull", IMAGE)
