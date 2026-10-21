@@ -32,8 +32,6 @@ a command runs:
 - `IS_ROOT` records whether the effective user is root (`os.geteuid() == 0`).
 - `BACKENDS` is the registry returned by `create_backends()`, in the fixed
   order bubblewrap, proot, chroot.
-- `CONTAINERS_STORAGE_DRIVER=vfs` and `CONTAINERS_EVENTS_BACKEND=file` are set
-  with `os.environ.setdefault`, so an inherited value wins.
 
 Because those constants are bound at import time, tests patch them by attribute
 (`monkeypatch.setattr(isolation, "BACKENDS", ...)`).
@@ -48,7 +46,9 @@ terms (no rootfs for that UUID) rather than for a missing argument.
 `POLYTHENE_TIMEOUT` reaches `--timeout`, and `POLYTHENE_STORE` reaches
 `--store`, without the option's own `env_var` being involved. A value that
 cannot be coerced is reported as
-`Invalid value for "POLYTHENE_TIMEOUT" from env`, not as a bad command line.
+`Invalid value for POLYTHENE_TIMEOUT from env`, naming the variable rather than
+the option, so the message distinguishes an environment fault from a bad
+command line.
 `--store` and `--isolation` also declare `env_var` explicitly, which makes the
 binding legible at the option rather than only in the app's configuration.
 
@@ -64,10 +64,12 @@ delimiter, Cyclopts stops parsing options and passes the remainder through as
 tokens, so `exec UUID -- --timeout notanint echo x` reaches the rootfs while
 `exec UUID --timeout notanint echo x` fails on the coercion of `notanint`. That
 is the form `PolytheneSession` emits. The `--` is load bearing; the
-`app.end_of_options_delimiter = "--"` assignment beside the app is not, because
-`--` is already Cyclopts's default and `App._resolve` falls back to it when
-nothing is set. The assignment records the default rather than enabling it;
-deleting it would not change behaviour. `CommandToken`'s `allow_leading_hyphen`
+`app.end_of_options_delimiter = "--"` assignment beside the app is not. The
+field's own default is `None`, and the parser resolves it with
+`AppStack.resolve("end_of_options_delimiter", fallback="--")`, so an unset
+attribute and an explicitly assigned `"--"` behave the same. The assignment
+records the default rather than enabling it; removing it would not change
+behaviour. `CommandToken`'s `allow_leading_hyphen`
 covers the rest, admitting a hyphen-led token such as `-n` in either form.
 
 Three terms recur throughout this guide, and are kept distinct:
@@ -393,6 +395,51 @@ The suite uses no mocking framework: there is no `cmd-mox` and no
 classes, a local stub, or `monkeypatch`. `pytest-timeout` is a development
 dependency, and `[tool.pytest.ini_options]` sets `timeout = 30`, so every test
 is killed after thirty seconds.
+
+### CLI contract tests
+
+`tests/test_cli_contract.py` pins the command-line *contract* rather than any
+one implementation of it. `CliResult` compares exit status and both output
+streams across three entry points — the in-process app, `python -m polythene`,
+and the installed console script. `assert_cli_diagnostic` checks a non-zero
+status, normalized diagnostic fragments, and an empty other stream, and
+`assert_no_process_launch` checks that a rejected command never printed the
+`$ cmd` launch echo. The in-process invalid-isolation case additionally checks
+that the recording backends received no calls. The helpers deliberately ignore
+Rich borders and whitespace: they assert useful diagnostic content, not Rich
+layout or Cyclopts' exact wording. That is what makes a dependency bump
+testable — the wording may move, the contract may not.
+
+Comparing a Cyclopts update uses one fixed base containing the contract tests.
+Install its locked dependencies in the control environment:
+
+```shell
+UV_PYTHON=3.13 UV_PROJECT_ENVIRONMENT=.venv-cyclopts3 uv sync --locked --group dev
+```
+
+In a separate worktree, apply only the dependency and lock changes, then
+install the treatment environment:
+
+```shell
+UV_PYTHON=3.13 UV_PROJECT_ENVIRONMENT=.venv-cyclopts4 uv sync --locked
+```
+
+Record each environment's Python patch, Cyclopts, and Rich versions. Run the
+unchanged regression test first; if it fails in the control, stop and record
+that as a baseline issue. Then run `tests/test_cli_contract.py` with
+`POLYTHENE_TEST_DIAGNOSTIC_STREAM=stdout` and again with it set to `stderr` in
+both environments, followed by `uv run --locked pytest -v`. Classify every
+failure against the control and retain the stream, status, and backend-call
+evidence in the change description rather than committing a test artefact.
+Repeat the matching `UV_PROJECT_ENVIRONMENT` setting on every `uv run` command;
+the setting used by `uv sync` applies only to that command. For example, run
+the treatment checks with:
+
+```shell
+UV_PROJECT_ENVIRONMENT=.venv-cyclopts4 uv run --locked pytest -v
+```
+
+Use `.venv-cyclopts3` for control checks.
 
 ## Mutation and contract testing
 

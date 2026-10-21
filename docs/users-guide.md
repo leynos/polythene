@@ -140,6 +140,31 @@ uv run polythene exec <uuid> -- make -C /workspace/tests system
 The `exec` invocation will select the available backend on each host while the
 commands run unchanged.
 
+## Output streams and exit status
+
+Polythene keeps stdout for command results. `pull` writes only the generated
+UUID; `exec` leaves stdout to the child command. Help output goes to stdout and
+exits with status 0.
+
+Parser errors, application errors, verbose logs, notices that a local image is
+being reused, and the `$ cmd` launch echo go to stderr. This keeps diagnostics
+available without adding them to captured command results.
+
+The CLI uses these exit statuses:
+
+| Situation                                                 | Status                          |
+| --------------------------------------------------------- | ------------------------------: |
+| Parser error                                              | Non-zero status set by Cyclopts |
+| `exec` has no command                                     | 2                               |
+| Requested UUID root filesystem is missing                 | 1                               |
+| Unsupported isolation backend in a direct `cmd_exec` call | 2                               |
+| All isolation backends are unavailable                    | 126                             |
+| A child command ran                                       | The child's status              |
+
+`polythene.main(argv)` raises `SystemExit` and does not return a status code.
+`PolytheneSession.run` returns the subprocess status reported by its sandbox
+runner.
+
 ## Environment variables
 
 Polythene recognizes the following environment variables:
@@ -152,8 +177,18 @@ Polythene recognizes the following environment variables:
   honour the value and fall back to their built-in defaults when the variable
   is unset.
 
-The CLI also sets two Podman hardening variables if they are not already set:
-`CONTAINERS_STORAGE_DRIVER=vfs` and `CONTAINERS_EVENTS_BACKEND=file`.
+Podman calls inherit the caller's environment and configuration files.
+Polythene sets no Podman storage or events configuration. The variables
+`CONTAINERS_STORAGE_DRIVER` and `CONTAINERS_EVENTS_BACKEND` have no effect on
+Podman. Callers can choose a storage driver with `STORAGE_DRIVER` or
+`--storage-driver`, or select a `storage.conf` file with
+`CONTAINERS_STORAGE_CONF`. They can choose the events logger with
+`engine.events_logger` in `containers.conf`, selected with `CONTAINERS_CONF`.
+
+Changing the storage driver or root selects a different Podman store. Images in
+the default store, including locally built images, are invisible to the
+local-image probe: it reports them absent, and Polythene pulls them. See
+[`polythene pull`](#polythene-pull) for the caller-store contract.
 
 ## Cleaning up exported filesystems
 
