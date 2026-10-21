@@ -739,6 +739,13 @@ the assets it lacks, using PyPI's bytes for shared names, verifies both
 destinations hold identical digests, then un-drafts the release. Nothing is
 ever overwritten, and no step uses `--clobber`.
 
+The attestation bundle is named `polythene-<tag>.sigstore.json`, from the tag
+alone, so a re-run finds the release already holding it. `publish-release` also
+records whether the release is still a draft before it uploads and sends
+nothing once it is published: a published release is complete, so a repeated
+tag uploads nothing at all. Every run's attestation stays in the repository's
+attestation store regardless of the asset's single name.
+
 Re-running a tag's workflow is safe and is the intended recovery path for a
 partly completed run: every destination converges on the same bytes per
 filename, and a complete second run uploads nothing. The one case that needs a

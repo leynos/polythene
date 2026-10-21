@@ -8,6 +8,8 @@ checked-in step scripts execute unchanged against state the test controls:
 - ``FAKE_GITHUB_ASSETS``: a directory holding one file per release asset.
 - ``FAKE_PYPI_FILES``: a directory holding one file per PyPI file.
 - ``FAKE_CALLS``: a file each call appends its argument vector to, as JSON.
+- ``FAKE_RELEASE_DRAFT``: whether ``gh release view`` reports the release as a
+  draft; defaults to ``true``, the state a first release run starts from.
 - ``FAKE_CURL_STATUSES``: comma-separated HTTP statuses the index returns in
   turn; the last repeats. Defaults to ``200``.
 
@@ -54,7 +56,12 @@ def _assets_json() -> str:
         {"name": path.name, "digest": f"sha256:{_digest(path)}"}
         for path in sorted(_directory("FAKE_GITHUB_ASSETS").iterdir())
     ]
-    return json.dumps({"assets": assets})
+    return json.dumps({"assets": assets, "isDraft": _is_draft()})
+
+
+def _is_draft() -> bool:
+    """Return whether the fake release is still a draft; it starts as one."""
+    return os.environ.get("FAKE_RELEASE_DRAFT", "true") == "true"
 
 
 def _gh_upload(files: list[str]) -> int:
@@ -85,6 +92,11 @@ def gh(args: list[str]) -> int:
     """Serve the ``gh release`` calls the release workflow makes."""
     command = args[1] if len(args) > 1 else ""
     if command == "view":
+        if "--jq" in args:
+            # The workflow asks for one scalar field; `gh --jq` prints the
+            # value alone, without the JSON document around it.
+            print("true" if _is_draft() else "false")
+            return 0
         print(_assets_json())
         return 0
     if command == "upload":

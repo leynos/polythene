@@ -198,16 +198,36 @@ def test_the_release_is_published_only_after_pypi() -> None:
         "draft-release", "Create or reuse the draft release"
     )
     names = [item.get("name") for item in _job("publish-release")["steps"]]
-    upload = names.index("Upload the assets the release lacks")
-    refetch = names.index("Re-fetch the PyPI index")
-    check = names.index("Check both destinations hold the same bytes")
-    assert upload < refetch < check < names.index("Publish the GitHub Release"), (
-        "PyPI is re-read after the upload, so the digest check sees what the "
-        "upload published, and both are compared before the release"
+    ordered = [
+        "Note whether the release is a draft",
+        "Upload the assets the release lacks",
+        "Re-fetch the PyPI index",
+        "Check both destinations hold the same bytes",
+        "Publish the GitHub Release",
+    ]
+    positions = [names.index(name) for name in ordered]
+    assert positions == sorted(positions), (
+        "the draft state decides the upload; PyPI is re-read after it, so the "
+        "digest check sees what the upload published, and both are compared "
+        "before the release"
     )
     assert "--draft=false" in step_script(
         "publish-release", "Publish the GitHub Release"
     )
+
+
+def test_the_attestation_bundle_is_named_by_the_tag() -> None:
+    """A per-run bundle name would add an asset on every re-run.
+
+    The release must upload nothing the second time a tag is pushed, so the
+    bundle's name may depend only on the tag, never on the run or its attempt.
+    """
+    script = step_script("attest", "Stage the provenance bundle")
+    assert "polythene-${GITHUB_REF_NAME}.sigstore.json" in script
+    for per_run in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"):
+        assert per_run not in script, (
+            f"a bundle named with {per_run} cannot converge across re-runs"
+        )
 
 
 def test_nothing_is_ever_overwritten_and_pypi_holds_no_github_token() -> None:

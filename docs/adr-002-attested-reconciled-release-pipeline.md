@@ -84,11 +84,14 @@ not declare.
 - `attest` (`contents: read`, `id-token: write`, `attestations: write`; needs
   `check-version`, `build-wheels`) collects every wheel and exactly one sdist,
   refuses a run that produced none or more than one, and attests all of them
-  with `actions/attest-build-provenance`. It keeps the Sigstore bundle under
-  the run-unique name `polythene-<tag>-run<run_id>-<attempt>.sigstore.json`, so
-  a later run never collides with an earlier one, and hands the files and the
-  bundle on as the `release-dist` artefact. Bytes a later job carries over from
-  an earlier run were attested by that run, and every run's bundle is retained.
+  with `actions/attest-build-provenance`. It stages the Sigstore bundle as
+  `polythene-<tag>.sigstore.json` and hands the files and the bundle on as the
+  `release-dist` artefact. The name depends on the tag alone because the
+  release must converge: a name that also encoded the run or its attempt would
+  be absent from the release on every re-run, so each re-run would add another
+  asset and break the guarantee that a repeated tag uploads nothing. Bytes a
+  later job carries over from an earlier run were attested by that run, and
+  every run's attestation remains in the repository's attestation store.
 - `draft-release` (`contents: write`; needs `check-version`, `attest`) creates
   the tag's GitHub Release as a draft, or reuses it if one already exists, and
   snapshots its current assets. It downloads GitHub's bytes for the names this
@@ -104,12 +107,16 @@ not declare.
   `skip-existing: true`, and skips the upload step entirely when nothing
   remains.
 - `publish-release` (`contents: write`; needs `check-version`, `draft-release`,
-  `publish-pypi`) uploads to the GitHub Release the names it lacks, taking
-  PyPI's bytes through the index's `files[].url` and checking them against
-  `files[].hashes.sha256`; uploads the run's Sigstore bundle; verifies that
-  every name carries the same SHA-256 on PyPI and on GitHub and that the bundle
-  is attached; and only then un-drafts the release, with `--prerelease` set
-  from the version check.
+  `publish-pypi`) first records whether the release is still a draft. Only a
+  draft receives uploads: a published release is by definition complete, so a
+  re-run — which always offers the bundle it built, even when the release
+  already holds that name — uploads nothing and still succeeds, which is what
+  makes a repeated tag idempotent. A draft path uploads the names the release
+  lacks, taking PyPI's bytes through the index's `files[].url` and checking
+  them against `files[].hashes.sha256`, plus the run's Sigstore bundle. Both
+  paths then verify that every name carries the same SHA-256 on PyPI and on
+  GitHub and that the bundle is attached, and only then un-draft the release,
+  with `--prerelease` set from the version check.
 
 ### Reconciliation and precedence
 

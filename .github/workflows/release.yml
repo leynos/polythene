@@ -73,9 +73,10 @@ jobs:
 
   # Attests exactly the files this run built, before anything leaves the run,
   # and hands them on as one artefact. Bytes a later job carries over from an
-  # earlier run were attested by that run; every run's attestation stays in
-  # the repository's attestation store, and its bundle is kept under a
-  # run-unique name so no release asset is ever overwritten.
+  # earlier run were attested by that run, and every run's attestation stays
+  # in the repository's attestation store. The bundle is named after the tag
+  # alone: a re-run then finds the release already holds that name and uploads
+  # nothing, while a name that changed per run would add a new asset each time.
   attest:
     needs:
       - check-version
@@ -123,8 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/attestations
-          bundle="polythene-${GITHUB_REF_NAME}-run${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          cp "${BUNDLE_PATH}" "dist/attestations/${bundle}.sigstore.json"
+          cp "${BUNDLE_PATH}" "dist/attestations/polythene-${GITHUB_REF_NAME}.sigstore.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         id: handoff
         with:
@@ -281,6 +281,22 @@ jobs:
     steps:
       - *scripts-checkout
       - *release-dist
+      # Recorded once, before any staging: the upload decision below compares
+      # this against PyPI's post-upload state.
+      - name: Note whether the release is a draft
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft' > is-draft
+          if [ "$(cat is-draft)" != true ]; then
+            echo "The release is already published; nothing will be uploaded." >&2
+            echo "is-draft=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "is-draft=true" >> "${GITHUB_OUTPUT}"
       - name: Fetch the PyPI index
         id: index
         run: *fetch-index
@@ -308,13 +324,29 @@ jobs:
           set -euo pipefail
           python3 -m scripts.release_assets_cli check-fetched --publish dist/publish \
             --index pypi-index.json --assets release-assets.json --output github-upload
-      # No `--clobber`: an asset the release already holds is canonical.
+      # No `--clobber`: an asset the release already holds is canonical. A
+      # published release is complete, so a re-run -- which always stages the
+      # bundle it built, even when the release already carries that name --
+      # uploads nothing and the step succeeds. A draft means either a first
+      # run, or one queued behind a complete run whose upload failed: both
+      # need the assets they lack.
       - name: Upload the assets the release lacks
         id: upload
-        if: steps.stage.outputs.pending == 'true'
+        env:
+          IS_DRAFT: ${{ steps.draft.outputs.is-draft }}
         run: |
           set -euo pipefail
-          gh release upload "${GITHUB_REF_NAME}" github-upload/*
+          if [ "${IS_DRAFT}" != true ]; then
+            echo "The release is already published; nothing to upload."
+            exit 0
+          fi
+          shopt -s nullglob
+          staged=(github-upload/*)
+          if [ "${#staged[@]}" -eq 0 ]; then
+            echo "The release holds every artefact this run built."
+            exit 0
+          fi
+          gh release upload "${GITHUB_REF_NAME}" "${staged[@]}"
       # The digest check compares what PyPI holds *now*, not what it held
       # before this run's upload: PyPI serves the index through a CDN cache,
       # so the copy fetched above can still omit a file `publish-pypi` has

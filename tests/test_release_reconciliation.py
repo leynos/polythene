@@ -12,6 +12,7 @@ taken from PyPI first, then GitHub, then this run, and nothing is replaced.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 import typing as typ
@@ -24,6 +25,7 @@ from tests.helpers.release_workflow import (
     link_scripts,
     outputs,
     run_bash,
+    step,
     step_script,
 )
 
@@ -31,7 +33,9 @@ if typ.TYPE_CHECKING:
     import pathlib as pth
 
 _TAG = "v1.2.3"
-_BUNDLE = "polythene-v1.2.3-run7-1.sigstore.json"
+#: The bundle is named after the tag, not the run, so a re-run meets the name
+#: the release already holds and uploads nothing.
+_BUNDLE = f"polythene-{_TAG}.sigstore.json"
 #: One name per reconciliation case: PyPI only, GitHub only, neither, both.
 _PYPI_ONLY, _GITHUB_ONLY, _NEITHER, _BOTH = (
     "p-1-py3-none-any.whl",
@@ -40,7 +44,9 @@ _PYPI_ONLY, _GITHUB_ONLY, _NEITHER, _BOTH = (
     "p-1.tar.gz",
 )
 _ARTEFACTS = (_PYPI_ONLY, _GITHUB_ONLY, _NEITHER, _BOTH)
+_DRAFT_STEP = "Note whether the release is a draft"
 _PUBLISH_STEPS = (
+    _DRAFT_STEP,
     "Fetch the PyPI index",
     "List the release assets",
     "Stage the assets the release lacks",
@@ -70,9 +76,45 @@ def _job_directory(fake: FakeRelease, job: str) -> tuple[pth.Path, dict[str, str
     return cwd, fake.env(GITHUB_REF_NAME=_TAG, GITHUB_OUTPUT=str(cwd / "output"))
 
 
+_STEP_OUTPUT = re.compile(r"\$\{\{\s*steps\.([\w-]+)\.outputs\.([\w-]+)\s*\}\}")
+
+
+def _reference(template: str, step_id: str, name: str, stated: dict[str, str]) -> str:
+    """Return the value a ``steps.<id>.outputs.<name>`` reference resolves to.
+
+    The workflow writes a step's outputs under whichever key the script chose,
+    which is usually but not always ``<id>-<name>``; the bare key is the other
+    form in use.
+    """
+    for key in (f"{step_id}-{name}", name):
+        if key in stated:
+            return stated[key]
+    msg = f"no output {step_id}.{name} was written by the preceding steps"
+    raise AssertionError(msg)
+
+
+def _substitute(value: str, stated: dict[str, str]) -> str:
+    """Replace each ``steps.<id>.outputs.<name>`` reference with its value."""
+    return _STEP_OUTPUT.sub(
+        lambda match: _reference(value, match.group(1), match.group(2), stated),
+        value,
+    )
+
+
 def _step(job: str, name: str, cwd: pth.Path, env: dict[str, str]) -> None:
-    """Run one step and require it to succeed."""
-    completed = run_bash(step_script(job, name), cwd, env)
+    """Run one step and require it to succeed.
+
+    The step's ``env`` is resolved the way GitHub Actions resolves it, so the
+    test exercises the workflow's real wiring rather than restating the value
+    it happens to expect.
+    """
+    stated = outputs(cwd / "output")
+    declared = typ.cast("dict[str, str]", step(job, name).get("env") or {})
+    resolved = {
+        variable: _substitute(str(value), stated)
+        for variable, value in declared.items()
+    }
+    completed = run_bash(step_script(job, name), cwd, {**env, **resolved})
     assert completed.returncode == 0, f"{job}/{name}: {completed.stderr}"
 
 
@@ -95,8 +137,7 @@ def _publish_release(fake: FakeRelease, *, verify: bool = True) -> pth.Path:
     cwd, env = _job_directory(fake, "publish-release")
     for name in _PUBLISH_STEPS:
         _step("publish-release", name, cwd, env)
-    if outputs(cwd / "output")["pending"] == "true":
-        _step("publish-release", "Upload the assets the release lacks", cwd, env)
+    _step("publish-release", "Upload the assets the release lacks", cwd, env)
     # The index is re-read after the upload, so the digest check sees PyPI's
     # state now rather than the copy fetched before anything was published.
     _step("publish-release", "Re-fetch the PyPI index", cwd, env)
@@ -157,13 +198,23 @@ def test_a_rerun_after_success_uploads_nothing(fake: FakeRelease) -> None:
     before = (_holdings(fake.pypi), _holdings(fake.github))
     for job in ("draft-release", "publish-pypi", "publish-release"):
         shutil.rmtree(fake.root / job)
+    # Forget the first run's calls: the assertions below are about the second.
+    (fake.root / "calls.jsonl").unlink()
 
+    # The first run published the release, so the second one starts from a
+    # public release; its own draft check is what keeps the bundle off it.
     _draft_and_publish_pypi(fake)
-    cwd = _publish_release(fake)
+    cwd, env = _job_directory(fake, "publish-release")
+    env.update(FAKE_RELEASE_DRAFT="false")
+    for name in _PUBLISH_STEPS:
+        _step("publish-release", name, cwd, env)
+    _step("publish-release", "Upload the assets the release lacks", cwd, env)
 
     assert (_holdings(fake.pypi), _holdings(fake.github)) == before
     assert outputs(fake.root / "publish-pypi" / "output")["remaining"] == "false"
     assert outputs(cwd / "output")["pending"] == "false"
+    uploads = [call for call in fake.calls("gh") if call[:2] == ["release", "upload"]]
+    assert uploads == [], "a complete re-run uploads nothing, bundle included"
 
 
 def test_the_check_fails_when_the_destinations_disagree(fake: FakeRelease) -> None:
@@ -189,12 +240,12 @@ def test_bytes_that_do_not_match_the_index_are_never_uploaded(
     """A PyPI download whose digest differs from the index stops the upload."""
     _draft_and_publish_pypi(fake)
     cwd, env = _job_directory(fake, "publish-release")
-    for name in _PUBLISH_STEPS[:2]:
+    for name in _PUBLISH_STEPS[:3]:
         _step("publish-release", name, cwd, env)
     (fake.pypi / _PYPI_ONLY).write_bytes(b"tampered in transit")
-    _step("publish-release", _PUBLISH_STEPS[2], cwd, env)
+    _step("publish-release", _PUBLISH_STEPS[3], cwd, env)
 
-    completed = run_bash(step_script("publish-release", _PUBLISH_STEPS[3]), cwd, env)
+    completed = run_bash(step_script("publish-release", _PUBLISH_STEPS[4]), cwd, env)
 
     assert completed.returncode != 0, "a download must match PyPI's digest"
     assert _PYPI_ONLY in completed.stderr
@@ -249,3 +300,61 @@ def test_a_pypi_only_name_uploads_when_the_bundle_is_already_attached(
 
     assert outputs(cwd / "output")["pending"] == "true"
     assert (fake.github / _PYPI_ONLY).read_bytes() == f"published {_PYPI_ONLY}".encode()
+
+
+def test_a_complete_rerun_uploads_nothing_even_though_it_staged_the_bundle(
+    fake: FakeRelease,
+) -> None:
+    """A second run reaches a published release and leaves its assets alone.
+
+    The run still builds and attests a bundle, so the staging step always
+    offers one; with the release already public, the upload step must decline
+    it. This is the acceptance criterion that a repeated tag uploads nothing.
+    """
+    for name in _ARTEFACTS:
+        (fake.pypi / name).write_bytes(f"published {name}".encode())
+        shutil.copyfile(fake.pypi / name, fake.github / name)
+    (fake.github / _BUNDLE).write_bytes(b"bundle")
+    before = _holdings(fake.github)
+
+    cwd, env = _job_directory(fake, "publish-release")
+    env.update(FAKE_RELEASE_DRAFT="false")
+    for name in _PUBLISH_STEPS:
+        _step("publish-release", name, cwd, env)
+    assert list((cwd / "github-upload").iterdir()) == [], (
+        "a published release has nothing lacking, the bundle included"
+    )
+    _step("publish-release", "Upload the assets the release lacks", cwd, env)
+
+    assert _holdings(fake.github) == before, "the bundle name must not be added again"
+    uploads = [call for call in fake.calls("gh") if call[:2] == ["release", "upload"]]
+    assert uploads == [], uploads
+
+
+def test_the_upload_step_refuses_a_staged_bundle_for_a_published_release(
+    fake: FakeRelease,
+) -> None:
+    """The guard, not only the staging step, keeps a published release unchanged.
+
+    ``publish-release``'s staging step can only offer a bundle when the index
+    it read still lacks it, and PyPI's CDN can serve such a stale index. The
+    upload step must therefore decline on its own once the release is public.
+    """
+    cwd, env = _job_directory(fake, "publish-release")
+    staged = cwd / "github-upload"
+    staged.mkdir()
+    (staged / _BUNDLE).write_bytes(b"bundle")
+    before = _holdings(fake.github)
+    # The draft check is what records the published state the upload reads.
+    _step(
+        "publish-release",
+        "Note whether the release is a draft",
+        cwd,
+        {**env, "FAKE_RELEASE_DRAFT": "false"},
+    )
+
+    _step("publish-release", "Upload the assets the release lacks", cwd, env)
+
+    assert _holdings(fake.github) == before
+    uploads = [call for call in fake.calls("gh") if call[:2] == ["release", "upload"]]
+    assert uploads == [], uploads
