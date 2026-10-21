@@ -192,13 +192,17 @@ result rather than noise — it is read back and stripped into `cid`, which is
 why that call stays on the ordinary path.
 
 The lifetimes are deliberately narrow. The container from step 7 is removed
-after the export when cleanup succeeds, but cleanup is best-effort: a
-`podman rm` that fails is suppressed, and the container can be left behind. The
-image is pulled at most once per `pull`, and the persistent artefacts are the
-exported directory and its metadata file. `--timeout` reaches every external
-command in the flow, so it bounds each operation rather than the export as a
-whole. A collision on the destination directory raises `FileExistsError`, which
-`cmd_pull` answers by generating a fresh UUID once and retrying.
+after the export when cleanup succeeds, but cleanup is best-effort only within
+one exception type. `contextlib.suppress(ProcessExecutionError)` catches a
+`podman rm` that exits non-zero; a cleanup that instead times out raises the
+builtin `TimeoutError`, which is not a `ProcessExecutionError`, so it escapes
+the suppression and propagates. The container can be left behind either way.
+The image is pulled at most once per `pull`, and the persistent artefacts are
+the exported directory and its metadata file. `--timeout` reaches every
+external command in the flow, so it bounds each operation rather than the
+export as a whole. A collision on the destination directory raises
+`FileExistsError`, which `cmd_pull` answers by generating a fresh UUID once and
+retrying.
 
 ### `polythene exec`
 
@@ -289,8 +293,11 @@ no-timeout run behave identically.
 
 Stream overrides exist for callers that must keep a chatty tool off their own
 streams. `polythene pull` passes `stdout=subprocess.DEVNULL` for `podman pull`
-and `podman rm`, so the UUID stays the only line it prints. Everything else in
-the package inherits the streams unchanged.
+and `podman rm`, so the UUID stays the only line it prints. When a call is not
+foreground, `run_cmd` returns the child's output to the caller instead of
+inheriting the terminal streams: the `podman image exists` probe and
+`podman create` are both non-foreground, and their callers read the result.
+Every foreground call inherits the streams unchanged.
 
 Timeout translation is confined to the foreground path. When `fg=True` and a
 timeout is set, plumbum's `ProcessTimedOut` is re-raised as the builtin
