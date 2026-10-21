@@ -205,6 +205,11 @@ def test_the_release_is_published_only_after_pypi() -> None:
         "Check both destinations hold the same bytes",
         "Publish the GitHub Release",
     ]
+    for name in ordered:
+        assert names.count(name) == 1, (
+            f"{name!r} appears {names.count(name)} times; `index` would then "
+            "compare one occurrence and leave the other unchecked"
+        )
     positions = [names.index(name) for name in ordered]
     assert positions == sorted(positions), (
         "the draft state decides the upload; PyPI is re-read after it, so the "
@@ -286,10 +291,15 @@ def _document_name(path: pth.Path) -> str:
 
 
 def _ci_documents() -> dict[str, object]:
-    """Parse every workflow and composite action in the repository."""
+    """Parse every workflow and composite action in the repository.
+
+    GitHub accepts both ``.yml`` and ``.yaml`` for each, so a sweep that read
+    one extension would leave the other unchecked.
+    """
+    workflows, actions = ROOT / ".github" / "workflows", ROOT / ".github" / "actions"
     paths = [
-        *sorted((ROOT / ".github" / "workflows").glob("*.yml")),
-        *sorted((ROOT / ".github" / "actions").glob("*/action.yml")),
+        *sorted((*workflows.glob("*.yml"), *workflows.glob("*.yaml"))),
+        *sorted((*actions.glob("*/action.yml"), *actions.glob("*/action.yaml"))),
     ]
     return {
         _document_name(path): load(path.read_text(encoding="utf-8"), path.name)

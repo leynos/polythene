@@ -202,8 +202,10 @@ def workflow_sources(directory: Path = WORKFLOW_DIR) -> list[tuple[str, str]]:
     Returns
     -------
     list[tuple[str, str]]
-        Each ``*.yml`` file's name and text, sorted by path. Every read goes
-        through ``read_source``, so an unreadable file fails by name.
+        Each ``*.yml`` or ``*.yaml`` file's name and text, sorted by path.
+        GitHub accepts both extensions, so a sweep that read one would leave
+        the other unchecked. Every read goes through ``read_source``, so an
+        unreadable file fails by name.
 
     Raises
     ------
@@ -216,7 +218,7 @@ def workflow_sources(directory: Path = WORKFLOW_DIR) -> list[tuple[str, str]]:
     if not directory.is_dir():
         message = f"{directory} is not a workflow directory"
         raise AssertionError(message)
-    paths = sorted(directory.glob("*.yml"))
+    paths = sorted((*directory.glob("*.yml"), *directory.glob("*.yaml")))
     if not paths:
         message = f"{directory} holds no workflow"
         raise AssertionError(message)
