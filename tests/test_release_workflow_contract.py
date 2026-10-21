@@ -398,7 +398,10 @@ def test_the_run_script_scan_finds_exactly_the_run_holders(document: object) -> 
 
 def test_every_workflow_parses_without_duplicate_keys() -> None:
     """Every workflow the repository ships is a document YAML reads once."""
-    assert workflow_sources(), "the sweep must reach the repository's workflows"
+    sources = workflow_sources()
+    assert sources, "the sweep must reach the repository's workflows"
+    for name, text in sources:
+        load(text, name)
 
 
 def test_the_release_workflow_has_no_telemetry_action() -> None:
