@@ -48,9 +48,9 @@ terms (no rootfs for that UUID) rather than for a missing argument.
 cannot be coerced is reported as
 `Invalid value for POLYTHENE_TIMEOUT from env`, naming the variable rather than
 the option, so the message distinguishes an environment fault from a bad
-command line.
-`--store` and `--isolation` also declare `env_var` explicitly, which makes the
-binding legible at the option rather than only in the app's configuration.
+command line. `--store` and `--isolation` also declare `env_var` explicitly,
+which makes the binding legible at the option rather than only in the app's
+configuration.
 
 Both routes are read afresh on each invocation, so a variable set after import
 still reaches the command even though `DEFAULT_STORE` was fixed at import. The
@@ -69,8 +69,8 @@ field's own default is `None`, and the parser resolves it with
 `AppStack.resolve("end_of_options_delimiter", fallback="--")`, so an unset
 attribute and an explicitly assigned `"--"` behave the same. The assignment
 records the default rather than enabling it; removing it would not change
-behaviour. `CommandToken`'s `allow_leading_hyphen`
-covers the rest, admitting a hyphen-led token such as `-n` in either form.
+behaviour. `CommandToken`'s `allow_leading_hyphen` covers the rest, admitting a
+hyphen-led token such as `-n` in either form.
 
 Three terms recur throughout this guide, and are kept distinct:
 
