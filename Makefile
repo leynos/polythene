@@ -10,7 +10,9 @@ MDTABLEFIX_RULES = --wrap --renumber --breaks --ellipsis --fences
 NIXIE ?= $(shell which nixie)
 TOOLS = ruff ty $(MDLINT) $(NIXIE) uv
 VENV_TOOLS = pytest
-PYTHON_TARGETS := polythene tests
+# `scripts/` holds the stdlib-only release reconciliation the tag workflow
+# runs; it is still Python, so the format, lint, and typecheck gates read it.
+PYTHON_TARGETS := polythene tests scripts
 UV ?= uv
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 
@@ -91,7 +93,10 @@ lint: ruff ## Run linters
 	ruff check $(PYTHON_TARGETS)
 
 typecheck: build ty ## Run typechecking
-	ty check $(PYTHON_TARGETS)
+	# `scripts/` is a namespace package resolved from the repository root, not
+	# an installed distribution module, so its imports need the root on the
+	# search path. `python3 -m scripts.release_assets_cli` runs the same way.
+	ty check --extra-search-path . $(PYTHON_TARGETS)
 
 markdownlint: spelling $(MDLINT) ## Lint Markdown files and enforce spelling
 	markdownlint-cli2 "**/*.md"

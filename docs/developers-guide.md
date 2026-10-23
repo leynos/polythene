@@ -585,16 +585,16 @@ path rather than to the empty string. Beyond the tool-check:
 
 ## Continuous integration
 
-Six workflows run from `.github/workflows/`.
+Five workflows run from `.github/workflows/`.
 
-| Workflow                   | Job                     | Purpose                                  |
-| -------------------------- | ----------------------- | ---------------------------------------- |
-| `ci.yml`                   | `lint-test`             | The pull-request and `main` gate         |
-| `coverage-main.yml`        | `coverage-upload`       | The `main`-only coverage publisher       |
-| `mutation-testing.yml`     | `mutation`              | The scheduled mutation-testing caller    |
-| `dependabot-automerge.yml` | `automerge`             | Auto-merge Dependabot pull requests      |
-| `build-wheels.yml`         | `build`                 | Cross-platform wheel builds, for callers |
-| `release.yml`              | `pure-wheel`, `release` | Publish a tagged release                 |
+| Workflow                   | Job               | Purpose                               |
+| -------------------------- | ----------------- | ------------------------------------- |
+| `ci.yml`                   | `lint-test`       | The pull-request and `main` gate      |
+|                            | `wheel-build`     | Assert the build makes one sdist      |
+| `coverage-main.yml`        | `coverage-upload` | The `main`-only coverage publisher    |
+| `mutation-testing.yml`     | `mutation`        | The scheduled mutation-testing caller |
+| `dependabot-automerge.yml` | `automerge`       | Auto-merge Dependabot pull requests   |
+| `release.yml`              | six release jobs  | Publish a tagged release              |
 
 `ci.yml` runs on pushes to `main` and on every pull request, with
 `contents: read`. Its steps install Python 3.13 and `uv`, run
@@ -608,12 +608,19 @@ explicit `make test` or pytest step: the tests run inside the shared
 `publish-artefact: 'false'`. The contract target runs before the tooling that
 follows it, so a broken pin fails the job early rather than after the installs.
 
-`release.yml` triggers on `v*.*.*` tags. The `pure-wheel` job builds a pure
-Python wheel with the local composite action, and `release` waits for it,
-creates the GitHub release with generated notes, and uploads the wheel to that
-release. This project has no C or Rust extensions, so no other wheel is built
-and nothing is published to PyPI. `build-wheels.yml` is a `workflow_call`
-workflow with a cross-platform matrix; no workflow in this repository calls it.
+`ci.yml` also declares `wheel-build`, which runs the same `pure-python-wheel`
+composite action as the release and then fails unless the build produced
+exactly one sdist and one wheel. The release ships the sdist alongside the
+wheel, so a pull request that produced none, or two, fails here rather than at
+tag time.
+
+`release.yml` triggers on `v*.*.*` tags and is described under
+[Publishing a release](#publishing-a-release). Its six jobs are `check-version`,
+`build-wheels`, `attest`, `draft-release`, `publish-pypi`, and
+`publish-release`; the release uploads to PyPI through Trusted Publishing and
+publishes a GitHub Release with the attested files and their Sigstore bundle.
+This project has no C or Rust extensions, so the one pure Python wheel and the
+sdist are the whole build.
 
 The CodeScene publisher, the ratchet, the `codescene` environment, and the
 conditions under which an upload runs are described in
@@ -686,3 +693,113 @@ to pin `UV_PYTHON` to that version, inside the project's `requires-python`
 `tests/workflow_contracts/test_cv005_wiring.py` fails if the pin is not a full
 commit, the target stops running the pinned checker, the repository parameter
 is wrong, `make all` drops the target or CI stops running it.
+
+## Publishing a release
+
+Releases are published by `.github/workflows/release.yml`, triggered by a tag
+matching `v*.*.*`. The process is modelled on cuprum's
+([ADR 017](https://github.com/leynos/cuprum/blob/main/docs/adr-017-release-pipeline.md));
+polythene's own record is
+[ADR 002](adr-002-attested-reconciled-release-pipeline.md).
+
+The distribution name on PyPI is `polythene-isolate`. The import package stays
+`polythene`, and so does the console script, so `uv run polythene` and
+`python -m polythene` are unchanged. `pyproject.toml` holds the distribution
+name, and `tests/test_release_publish_steps.py` fails if the release workflow
+publishes anything else.
+
+### Cut a release
+
+1. Set `version` in `pyproject.toml` to the release version, without the `v`,
+   and refresh `uv.lock` if the change touches packaging metadata.
+2. Merge that change to `main`.
+3. Tag the merge commit as `v<version>` — the tag and the manifest must agree
+   exactly, so `v0.2.0-beta1` matches `0.2.0-beta1` and `v0.2.0` does not.
+4. Push the tag. The workflow does the rest.
+
+A version containing a pre-release segment (`a`, `b`, `rc`, and so on) makes
+`check-version` report `prerelease = true`, which marks the GitHub Release as a
+pre-release. The PyPI upload is unaffected.
+
+### What the workflow does
+
+`check-version` compares the tag with `pyproject.toml` and reports the
+pre-release status; every attest, upload, and release job waits on it.
+`build-wheels` runs the `pure-python-wheel` composite action, whose plain
+`uv build` produces the sdist and then the wheel built from it. `attest`
+collects every wheel and exactly one sdist, refuses a build that produced
+anything else, attests all of them, and hands the files and the Sigstore bundle
+on as one artefact.
+
+`publish-pypi` runs in the `pypi` environment with `contents: read` and
+`id-token: write` only. It reads PyPI's Simple index, drops the names PyPI
+already holds, and uploads the rest with `skip-existing: true`. `draft-release`
+creates or reuses a draft GitHub Release, and `publish-release` sends it only
+the assets it lacks, using PyPI's bytes for shared names, verifies both
+destinations hold identical digests, then un-drafts the release. Nothing is
+ever overwritten, and no step uses `--clobber`.
+
+The index read at the start of `publish-release` can predate `publish-pypi`'s
+upload, because PyPI serves it through a CDN cache; the re-read just before the
+digest check therefore keeps asking, within the same six-attempt budget, until
+the listing shows every name the run staged. A cache that is merely behind
+delays the release instead of failing it, and the step fails only if the
+listing never catches up.
+
+The attestation bundle is named `polythene-<tag>.sigstore.json`, from the tag
+alone, so a re-run finds the release already holding it. `publish-release` also
+records whether the release is still a draft before it uploads and sends
+nothing once it is published: a published release is complete, so a repeated
+tag uploads nothing at all. Every run's attestation stays in the repository's
+attestation store regardless of the asset's single name.
+
+A bundle is attached only when it describes the bytes the release ships. Each
+filename's source is chosen separately, so on a re-run whose rebuild differs
+from what is already published, the release carries an earlier run's bytes for
+those names — possibly alongside this run's bytes for names nothing held yet.
+This run's bundle would then attest a build part of the release does not carry,
+so `publish-release` withholds it and logs a notice. The attestation is not
+lost — it stays in the attestation store — and the run still succeeds. A first
+release, or any re-run that reproduces every published byte, attaches the
+bundle as usual.
+
+Re-running a tag's workflow is safe and is the intended recovery path for a
+partly completed run: every destination converges on the same bytes per
+filename, and a complete second run uploads nothing. The one case that needs a
+human is a name whose bytes already differ between PyPI and the GitHub Release;
+the release then stays a draft until an administrator deletes the offending
+asset from the GitHub Release. PyPI's published files can never be deleted.
+
+The release tests run under `make test`:
+`tests/test_release_workflow_contract.py` holds the job scopes, environment,
+concurrency, ordering, and pinned actions;
+`tests/test_release_publish_steps.py`, `tests/test_release_github_steps.py`, and
+`tests/test_release_reconciliation.py` execute the checked-in steps against
+scratch directories and recording `gh` and `curl` stand-ins. `ci.yml` runs the
+same composite action on every pull request and fails unless the build produced
+exactly one sdist and one wheel, so a missing sdist is caught before a tag.
+
+### Repository settings
+
+Two settings outside this repository must exist before the first tag, and both
+are already expected by the workflow:
+
+- **GitHub environment `pypi`.** Create the environment under Settings →
+  Environments, restrict its deployment branches and tags to tags matching
+  `v*.*.*`, and add no secrets: Trusted Publishing needs only the OIDC token.
+- **PyPI Trusted Publisher.** Register the `polythene-isolate` project with a
+  pending publisher naming owner `leynos`, repository `polythene`, workflow
+  `release.yml`, and environment `pypi`. If the project already exists, add the
+  same publisher under its Publishing settings instead.
+
+The environment name and the published distribution name are asserted in
+`tests/test_release_workflow_contract.py`, so changing either in the workflow
+means changing the PyPI publisher and the GitHub environment to match.
+
+### Telemetry
+
+polythene does not carry cuprum's `release-telemetry` action. The pipeline has
+no metric consumer, and GitHub's run history and the attestation store already
+record what each run did. `tests/test_release_workflow_contract.py` fails if
+the action is reintroduced; the rationale is in
+[ADR 002](adr-002-attested-reconciled-release-pipeline.md#no-telemetry-action).

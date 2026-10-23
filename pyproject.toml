@@ -1,5 +1,5 @@
 [project]
-name = "polythene"
+name = "polythene-isolate"
 version = "0.1.0"
 description = "A tool for creating and managing containerised environments."
 readme = "README.md"
@@ -41,7 +41,7 @@ issues = "https://github.com/leynos/polythene/issues"
 
 [dependency-groups]
 dev = [
-    "polythene[test]",
+    "polythene-isolate[test]",
     "ruff",
     "pyright",
     "pytest-timeout",
@@ -59,7 +59,7 @@ include = ["polythene*"]
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-include = ["polythene", "tests"]
+include = ["polythene", "tests", "scripts"]
 
 [tool.ruff]
 line-length = 88

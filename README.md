@@ -42,9 +42,18 @@ privileged `chroot` if they are present.
 
 ## Installation
 
-The repository ships with a Makefile that builds a virtual environment via
-[uv](https://github.com/astral-sh/uv). Install the tooling and project
-dependencies with:
+Polythene is published to PyPI as `polythene-isolate`. Install it with
+[uv](https://github.com/astral-sh/uv):
+
+```shell
+uv tool install polythene-isolate
+```
+
+The distribution name differs from the command it installs: the import package
+and the console script are both `polythene`.
+
+To work on the project itself, the repository ships with a Makefile that builds
+a virtual environment via uv. Install the tooling and project dependencies with:
 
 ```shell
 make build
@@ -59,15 +68,16 @@ make all
 
 ## Usage
 
-Polythene exposes a Cyclopts CLI entry point named `polythene`. Run it with
-`uv run` during development, or call the installed script directly after `pip`/
-`uv` installation. The module shim also supports `python -m polythene` for
-environments that prefer explicit interpreter invocation:
+Polythene exposes a Cyclopts CLI entry point named `polythene`. The module shim
+also supports `python -m polythene` for environments that prefer explicit
+interpreter invocation. Both forms must run in the environment that has the
+package installed: after `uv tool install` the console script alone is on
+`PATH`, so prefix a project dependency with `uv run`:
 
 ```shell
 uv run polythene pull docker.io/library/busybox:latest
 # or
-python -m polythene pull docker.io/library/busybox:latest
+uv run python -m polythene pull docker.io/library/busybox:latest
 ```
 
 The `pull` command exports the image to a UUID-named directory in

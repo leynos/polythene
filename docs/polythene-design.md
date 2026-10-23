@@ -78,3 +78,21 @@ sequenceDiagram
 - **Documentation-first:** Behavioural specifications (pytest-bdd scenarios)
   describe the expected workflows, ensuring documentation and implementation
   stay aligned.
+
+## Packaging and release
+
+The distribution published to PyPI is `polythene-isolate`, while the import
+package and the console script are both `polythene`. The distinction keeps the
+PyPI name available to this project without renaming either the module that
+users import or the command they run.
+
+Releases are built from the sdist: a plain `uv build` produces the sdist and
+then the wheel from it, so a successful build also proves the sdist is
+complete. The release pipeline attests both files, publishes them to PyPI, and
+attaches the same bytes and the Sigstore bundle to the tag's GitHub Release.
+Publication is reconciled per filename with a fixed precedence — PyPI, then the
+GitHub Release, then the run's own bytes — so a repeated tag converges rather
+than overwriting anything already published. The pipeline, the name, and the
+reconciliation rule are recorded in
+[ADR 002](adr-002-attested-reconciled-release-pipeline.md); the operational
+steps are in the [developer guide](developers-guide.md#publishing-a-release).

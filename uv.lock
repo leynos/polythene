@@ -220,7 +220,7 @@ wheels = [
 ]
 
 [[package]]
-name = "polythene"
+name = "polythene-isolate"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -238,7 +238,7 @@ test = [
 [package.dev-dependencies]
 dev = [
     { name = "packaging" },
-    { name = "polythene", extra = ["test"] },
+    { name = "polythene-isolate", extra = ["test"] },
     { name = "pyright" },
     { name = "pytest-timeout" },
     { name = "pyyaml" },
@@ -258,7 +258,7 @@ provides-extras = ["test"]
 [package.metadata.requires-dev]
 dev = [
     { name = "packaging", specifier = ">=25.0,<27" },
-    { name = "polythene", extras = ["test"] },
+    { name = "polythene-isolate", extras = ["test"] },
     { name = "pyright" },
     { name = "pytest-timeout" },
     { name = "pyyaml", specifier = ">=6.0.3" },
