@@ -324,10 +324,11 @@ def attests_canonical_bytes(state: State) -> bool:
 
     A bundle attests the artefacts one run built. Reconciliation can instead
     publish bytes an earlier run built — PyPI's, or an existing release
-    asset's — because those are canonical and are never overwritten. Attaching
-    this run's bundle then would put a provenance claim on the release that its
-    own assets contradict, so the bundle is withheld unless every name's
-    canonical bytes are the ones this run built and attested.
+    asset's — for some or all names, because those are canonical and are never
+    overwritten, while names neither destination holds keep this run's bytes.
+    Attaching this run's bundle then would put a provenance claim on the release
+    that part of its own assets contradict, so the bundle is withheld unless
+    every name's canonical bytes are the ones this run built and attested.
 
     Parameters
     ----------
@@ -419,7 +420,7 @@ def verify(state: State, bundles: Path) -> list[str]:
     """Describe every artefact or bundle the two destinations disagree on.
 
     A bundle is required only when it attests the bytes the release ships; see
-    :func:`attests_canonical_bytes`. A run that reconciles onto another run's
+    :func:`attests_canonical_bytes`. A run that reconciles any name onto other
     bytes cannot truthfully attach its own, and `verify` must not demand it.
     """
     pypi = {name: file.sha256 for name, file in state.pypi.items()}

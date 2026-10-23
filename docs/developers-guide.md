@@ -753,13 +753,15 @@ nothing once it is published: a published release is complete, so a repeated
 tag uploads nothing at all. Every run's attestation stays in the repository's
 attestation store regardless of the asset's single name.
 
-A bundle is attached only when it describes the bytes the release ships. On a
-re-run whose rebuild differs from what PyPI already holds, the release's
-artefacts are the earlier run's bytes, and this run's bundle would attest a
-build the release does not carry; `publish-release` then withholds it and logs
-a notice. The attestation is not lost — it stays in the attestation store — and
-the run still succeeds. A first release, or any re-run that reproduces the
-published bytes, attaches the bundle as usual.
+A bundle is attached only when it describes the bytes the release ships. Each
+filename's source is chosen separately, so on a re-run whose rebuild differs
+from what is already published, the release carries an earlier run's bytes for
+those names — possibly alongside this run's bytes for names nothing held yet.
+This run's bundle would then attest a build part of the release does not carry,
+so `publish-release` withholds it and logs a notice. The attestation is not
+lost — it stays in the attestation store — and the run still succeeds. A first
+release, or any re-run that reproduces every published byte, attaches the
+bundle as usual.
 
 Re-running a tag's workflow is safe and is the intended recovery path for a
 partly completed run: every destination converges on the same bytes per

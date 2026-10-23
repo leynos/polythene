@@ -190,17 +190,18 @@ Both are kept: the build provenance attestation covers the run that produced
 the bytes, wherever they end up, while the PEP 740 attestation is PyPI's own
 record for its index.
 
-A bundle attests exactly the artefacts one run built. Reconciliation can
-instead ship bytes an earlier run built, because PyPI's files and existing
-release assets are canonical and are never overwritten; on a re-run whose
-rebuild differs, every canonical byte belongs to an earlier run. Attaching this
-run's bundle then would put a provenance claim on the release that its own
-assets contradict, so `publish-release` withholds the bundle unless every
-name's canonical bytes are the ones this run built and attested. Withholding is
-not a failure: the run's attestation still reaches the repository's attestation
-store, and `verify` requires a bundle only when one can be truthful. A name
-whose canonical source reports no digest also withholds the bundle, because the
-claim cannot be checked.
+A bundle attests exactly the artefacts one run built. The plan chooses each
+filename's canonical source independently, so a release can end up with a mixed
+set: PyPI's or an existing release asset's bytes for names already published,
+and this run's own bytes for names neither destination holds. On a re-run whose
+rebuild differs, the published names carry an earlier run's bytes. Attaching
+this run's bundle then would put a provenance claim on the release that part of
+its own assets contradicts, so `publish-release` withholds the bundle unless
+*every* name's canonical bytes are the ones this run built and attested.
+Withholding is not a failure: the run's attestation still reaches the
+repository's attestation store, and `verify` requires a bundle only when one
+can be truthful. A name whose canonical source reports no digest also withholds
+the bundle, because the claim cannot be checked.
 
 ### Sdist cardinality on every pull request
 
