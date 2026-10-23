@@ -31,6 +31,7 @@ from tests.helpers.release_workflow import (
 
 if typ.TYPE_CHECKING:
     import pathlib as pth
+    import subprocess
 
 _TAG = "v1.2.3"
 #: The bundle is named after the tag, not the run, so a re-run meets the name
@@ -101,12 +102,13 @@ def _substitute(value: str, stated: dict[str, str]) -> str:
     )
 
 
-def _step(job: str, name: str, cwd: pth.Path, env: dict[str, str]) -> None:
-    """Run one step and require it to succeed.
+def _run_step(
+    job: str, name: str, cwd: pth.Path, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Run one step with its declared ``env`` resolved as GitHub Actions does.
 
-    The step's ``env`` is resolved the way GitHub Actions resolves it, so the
-    test exercises the workflow's real wiring rather than restating the value
-    it happens to expect.
+    Resolving the declaration rather than restating it means the test exercises
+    the workflow's real wiring, including any variable a step opts into.
     """
     stated = outputs(cwd / "output")
     declared = typ.cast("dict[str, str]", step(job, name).get("env") or {})
@@ -114,7 +116,12 @@ def _step(job: str, name: str, cwd: pth.Path, env: dict[str, str]) -> None:
         variable: _substitute(str(value), stated)
         for variable, value in declared.items()
     }
-    completed = run_bash(step_script(job, name), cwd, {**env, **resolved})
+    return run_bash(step_script(job, name), cwd, {**env, **resolved})
+
+
+def _step(job: str, name: str, cwd: pth.Path, env: dict[str, str]) -> None:
+    """Run one step and require it to succeed."""
+    completed = _run_step(job, name, cwd, env)
     assert completed.returncode == 0, f"{job}/{name}: {completed.stderr}"
 
 
@@ -165,7 +172,12 @@ def fake(tmp_path: pth.Path) -> FakeRelease:
 
 
 def test_every_name_converges_on_its_canonical_bytes(fake: FakeRelease) -> None:
-    """PyPI's bytes win, then GitHub's, then this run's, on both sides."""
+    """PyPI's bytes win, then GitHub's, then this run's, on both sides.
+
+    This run's bundle is withheld: the run rebuilt ``_PYPI_ONLY`` and
+    ``_GITHUB_ONLY``, so its attestation describes bytes the release does not
+    ship. Attaching it would claim provenance for a different build.
+    """
     _draft_and_publish_pypi(fake)
     _publish_release(fake)
 
@@ -176,19 +188,59 @@ def test_every_name_converges_on_its_canonical_bytes(fake: FakeRelease) -> None:
         _BOTH: b"both",
     }
     assert _holdings(fake.pypi) == expected
-    assert _holdings(fake.github) == {**expected, _BUNDLE: b"bundle"}
+    assert _holdings(fake.github) == expected
 
 
 def test_each_destination_is_sent_only_what_it_lacks(fake: FakeRelease) -> None:
-    """GitHub is sent the PyPI-only and new names and the bundle, nothing else."""
+    """GitHub is sent the PyPI-only and new names, nothing else."""
     _draft_and_publish_pypi(fake)
     _publish_release(fake)
 
     uploads = [call for call in fake.calls("gh") if call[:2] == ["release", "upload"]]
     assert len(uploads) == 1, uploads
     sent = sorted(path.rsplit("/", 1)[-1] for path in uploads[0][3:])
-    assert sent == sorted((_PYPI_ONLY, _NEITHER, _BUNDLE))
+    assert sent == sorted((_PYPI_ONLY, _NEITHER))
     assert not any("--clobber" in call for call in fake.calls("gh"))
+
+
+def test_the_bundle_is_attached_when_every_artefact_is_this_runs_build(
+    fake: FakeRelease,
+) -> None:
+    """A first release ships the attested bytes, so its bundle is truthful."""
+    for name in _ARTEFACTS:
+        (fake.pypi / name).unlink(missing_ok=True)
+        (fake.github / name).unlink(missing_ok=True)
+
+    _draft_and_publish_pypi(fake)
+    _publish_release(fake)
+
+    assert (fake.github / _BUNDLE).read_bytes() == b"bundle", (
+        "the bundle attests exactly the bytes both destinations now hold"
+    )
+
+
+def test_the_bundle_is_withheld_when_the_published_bytes_are_not_this_build(
+    fake: FakeRelease,
+) -> None:
+    """An attestation must never describe bytes the release does not ship.
+
+    A re-run rebuilds every artefact, and PyPI's immutable files stay
+    canonical. The run's bundle attests the rebuild, so attaching it would put
+    a provenance claim on the release that its own assets contradict. The
+    attestation still reaches the repository's attestation store.
+    """
+    _draft_and_publish_pypi(fake)
+    cwd, env = _job_directory(fake, "publish-release")
+    for name in _PUBLISH_STEPS:
+        _step("publish-release", name, cwd, env)
+
+    assert list((cwd / "github-upload").iterdir()) != [], "artefacts are staged"
+    assert not (cwd / "github-upload" / _BUNDLE).exists(), (
+        "the run's bundle must not ride along with bytes it did not build"
+    )
+
+    _step("publish-release", "Upload the assets the release lacks", cwd, env)
+    assert _BUNDLE not in _holdings(fake.github)
 
 
 def test_a_rerun_after_success_uploads_nothing(fake: FakeRelease) -> None:
@@ -250,6 +302,71 @@ def test_bytes_that_do_not_match_the_index_are_never_uploaded(
     assert completed.returncode != 0, "a download must match PyPI's digest"
     assert _PYPI_ONLY in completed.stderr
     assert _PYPI_ONLY not in _holdings(fake.github)
+
+
+def test_the_re_fetch_polls_past_a_cached_index(fake: FakeRelease) -> None:
+    """A CDN cache that still predates the upload must not fail the release.
+
+    PyPI serves its Simple index through a cache, so the first response after
+    ``publish-pypi`` uploads a file can omit that file even though it has been
+    published. The re-fetch therefore keeps asking, for a bounded number of
+    attempts, until every name this run staged is listed; otherwise a
+    successful release would stay a draft until the cache expired.
+    """
+    _draft_and_publish_pypi(fake)
+    cwd, env = _job_directory(fake, "publish-release")
+    for name in _PUBLISH_STEPS:
+        _step("publish-release", name, cwd, env)
+    _step("publish-release", "Upload the assets the release lacks", cwd, env)
+    just_published = ",".join((_PYPI_ONLY, _NEITHER))
+    # Index readings so far: one in `publish-pypi`, one at the start of this
+    # job. The next response is the stale cache, the one after it is current.
+    env = {
+        **env,
+        "FAKE_CURL_STALE_AFTER": "2",
+        "FAKE_CURL_STALE_CALLS": "1",
+        "FAKE_CURL_STALE_NAMES": just_published,
+    }
+    before = len(fake.calls("curl"))
+
+    refetch = _run_step("publish-release", "Re-fetch the PyPI index", cwd, env)
+    assert refetch.returncode == 0, refetch.stderr
+    _step("publish-release", "Check both destinations hold the same bytes", cwd, env)
+
+    listed = json.loads((cwd / "pypi-index.json").read_text(encoding="utf-8"))
+    assert {entry["filename"] for entry in listed["files"]} == set(_ARTEFACTS), (
+        "the re-fetch must end on a response that shows the upload"
+    )
+    index_url = "https://pypi.org/simple/polythene-isolate/"
+    indexes = [call for call in fake.calls("curl")[before:] if call[-1] == index_url]
+    assert len(indexes) == 2, "a stale response, then the one that shows the upload"
+    assert "::error" not in refetch.stderr, (
+        "a cache that is merely behind must not paint an error annotation"
+    )
+
+
+def test_the_re_fetch_stays_bounded_when_the_index_never_catches_up(
+    fake: FakeRelease,
+) -> None:
+    """A cache that never shows the upload fails the step, not the job forever."""
+    _draft_and_publish_pypi(fake)
+    cwd, env = _job_directory(fake, "publish-release")
+    for name in _PUBLISH_STEPS:
+        _step("publish-release", name, cwd, env)
+    _step("publish-release", "Upload the assets the release lacks", cwd, env)
+    env = {
+        **env,
+        "FAKE_CURL_STALE_AFTER": "1",
+        "FAKE_CURL_STALE_CALLS": "99",
+        "FAKE_CURL_STALE_NAMES": ",".join(_ARTEFACTS),
+    }
+    before = len(fake.calls("curl"))
+
+    completed = _run_step("publish-release", "Re-fetch the PyPI index", cwd, env)
+
+    assert completed.returncode != 0, "a permanently stale index must fail"
+    assert "still does not list" in completed.stderr
+    assert len(fake.calls("curl")) - before <= 6, "the poll must stay bounded"
 
 
 def test_the_index_is_read_again_after_the_upload(fake: FakeRelease) -> None:

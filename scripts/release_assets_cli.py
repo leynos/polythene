@@ -14,9 +14,10 @@ or Polythene) at release time, and every network call stays in the workflow's
 standards' Cyclopts and Python 3.13 defaults. Each subcommand is one step of
 ``release.yml``: ``carryover`` (``draft-release``), ``stage-pypi``
 (``publish-pypi``), then ``stage-github``, ``check-fetched``, and ``verify``
-(``publish-release``). The reconciliation logic itself lives in
-``scripts/release_assets.py``; this module only wires it to ``argparse`` and
-the workflow's ``GITHUB_OUTPUT`` protocol.
+(``publish-release``), plus ``index-expected``, which the post-upload index
+re-read polls until the listing catches up with that upload. The reconciliation
+logic itself lives in ``scripts/release_assets.py``; this module only wires it
+to ``argparse`` and the workflow's ``GITHUB_OUTPUT`` protocol.
 """
 
 from __future__ import annotations
@@ -31,6 +32,8 @@ from scripts.release_assets import (
     State,
     carryover,
     check_fetched,
+    local_names,
+    missing_from_index,
     stage_github,
     stage_pypi,
     verify,
@@ -46,11 +49,15 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=_COMMANDS)
     parser.add_argument("--publish", type=Path, required=True)
-    parser.add_argument("--assets", type=Path, required=True)
+    parser.add_argument("--assets", type=Path)
     parser.add_argument("--index", type=Path)
     parser.add_argument("--github-files", type=Path)
     parser.add_argument("--bundles", type=Path)
     parser.add_argument("--output", type=Path)
+    # The post-upload index poll re-runs `index-expected` until it passes; a
+    # failure there is the expected first answer, not a release failure, so it
+    # must not paint an error annotation over a step that goes on to succeed.
+    parser.add_argument("--poll", action="store_true")
     return parser
 
 
@@ -84,6 +91,18 @@ def _stage_github(state: State, args: argparse.Namespace) -> None:
     write_output("pending", value=bool(fetch) or any(output.iterdir()))
 
 
+def _index_expected(state: State, args: argparse.Namespace) -> None:
+    """Fail unless the index lists every name this run staged."""
+    del args
+    problems = missing_from_index(local_names(state.publish), state.pypi)
+    if problems:
+        msg = (
+            "the PyPI index still does not list "
+            f"{', '.join(problems)}; a CDN cache may be behind"
+        )
+        raise ReleaseAssetError(msg)
+
+
 def _check_fetched(state: State, args: argparse.Namespace) -> None:
     """Check every fetched PyPI file against PyPI's digest."""
     check_fetched(state, _path(args, "output"))
@@ -102,6 +121,7 @@ _COMMANDS: dict[str, cabc.Callable[[State, argparse.Namespace], None]] = {
     "stage-pypi": _stage_pypi,
     "stage-github": _stage_github,
     "check-fetched": _check_fetched,
+    "index-expected": _index_expected,
     "verify": _verify,
 }
 
@@ -113,7 +133,10 @@ def main(argv: cabc.Sequence[str] | None = None) -> int:
         state = State.load(args.publish, args.index, args.assets)
         _COMMANDS[args.command](state, args)
     except (ReleaseAssetError, OSError, KeyError, ValueError) as error:
-        print(f"::error title=release-assets::{error}", file=sys.stderr)
+        if args.poll:
+            print(error, file=sys.stderr)
+        else:
+            print(f"::error title=release-assets::{error}", file=sys.stderr)
         return 1
     return 0
 

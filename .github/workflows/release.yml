@@ -213,11 +213,19 @@ jobs:
           path: github-state
       # `publish-release` reuses this script through its anchor. The runner's
       # curl cannot report `%{num_retries}`, so the loop retries a network
-      # error, 429, or 5xx itself and counts the attempts.
+      # error, 429, or 5xx itself and counts the attempts. A caller that also
+      # sets `EXPECTED_PUBLISH` keeps asking, within the same attempt budget,
+      # until the index lists every artefact in that directory: PyPI's CDN can
+      # answer 200 with a listing that predates an upload, and that miss is
+      # invisible in the status alone.
       - name: Fetch the PyPI index
         id: index
         run: &fetch-index |
           set -euo pipefail
+          index_is_current() {
+            python3 -m scripts.release_assets_cli index-expected --poll \
+              --publish "${EXPECTED_PUBLISH}" --index pypi-index.json
+          }
           attempt=0
           status=000
           while [ "${attempt}" -lt 6 ]; do
@@ -229,6 +237,12 @@ jobs:
               https://pypi.org/simple/polythene-isolate/) || status=000
             case "${status}" in
               000|429|5??) [ "${attempt}" -lt 6 ] && sleep 2 ;;
+              200|404)
+                if [ -z "${EXPECTED_PUBLISH:-}" ] || index_is_current; then
+                  break
+                fi
+                [ "${attempt}" -lt 6 ] && sleep 5
+                ;;
               *) break ;;
             esac
           done
@@ -241,6 +255,9 @@ jobs:
               exit 1
               ;;
           esac
+          if [ -n "${EXPECTED_PUBLISH:-}" ]; then
+            index_is_current
+          fi
       # PyPI rejects a second upload of an existing filename, so names it holds
       # are dropped, and a name only the GitHub Release holds is sent with
       # GitHub's bytes rather than this run's rebuild.
@@ -348,11 +365,15 @@ jobs:
           fi
           gh release upload "${GITHUB_REF_NAME}" "${staged[@]}"
       # The digest check compares what PyPI holds *now*, not what it held
-      # before this run's upload: PyPI serves the index through a CDN cache,
-      # so the copy fetched above can still omit a file `publish-pypi` has
-      # just published.
+      # before this run's upload. One re-read is not enough: PyPI serves the
+      # index through a CDN cache, so a 200 can still describe the state
+      # before `publish-pypi` uploaded. Ask again, within a fixed budget, until
+      # the index lists every name this run staged, so a cache that lags the
+      # upload delays the release instead of failing it.
       - name: Re-fetch the PyPI index
         id: index-final
+        env:
+          EXPECTED_PUBLISH: dist/publish
         run: *fetch-index
       - name: Check both destinations hold the same bytes
         id: verify

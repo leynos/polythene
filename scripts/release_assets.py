@@ -23,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import typing as typ
 import urllib.parse
 from pathlib import Path
@@ -230,10 +231,14 @@ class State:
     github: dict[str, str | None]
 
     @classmethod
-    def load(cls, publish: Path, index: Path | None, assets: Path) -> State:
-        """Read the staged artefacts, the PyPI index, and the asset listing."""
+    def load(cls, publish: Path, index: Path | None, assets: Path | None) -> State:
+        """Read the staged artefacts and whichever destination listings exist.
+
+        ``assets`` is optional because one command reads the PyPI index alone;
+        a caller that needs the release's holdings passes the listing.
+        """
         pypi = read_pypi_index(index) if index is not None else {}
-        return cls(publish, pypi, read_github_assets(assets))
+        return cls(publish, pypi, read_github_assets(assets) if assets else {})
 
     def plan(self) -> Plan:
         """Plan this run's uploads against both destinations."""
@@ -300,13 +305,98 @@ def _copy_pypi_gap(
             shutil.copyfile(publish / name, output / name)
 
 
-def _copy_unattached_bundles(
-    bundles: Path, github: cabc.Mapping[str, str | None], output: Path
-) -> None:
-    """Copy each bundle the GitHub Release does not already hold into ``output``."""
-    for bundle in sorted(bundles.iterdir()):
-        if bundle.name not in github:
-            shutil.copyfile(bundle, output / bundle.name)
+def canonical_digest(state: State, name: str) -> tuple[Source, str | None]:
+    """Return which source's bytes are canonical for ``name``, and their digest.
+
+    The digest is ``None`` only for a GitHub asset whose digest GitHub did not
+    report; this run's own bytes are always hashable.
+    """
+    source = state.plan().canonical[name]
+    if source is Source.PYPI:
+        return source, state.pypi[name].sha256
+    if source is Source.GITHUB:
+        return source, state.github[name]
+    return source, sha256_of(state.publish / name)
+
+
+def attests_canonical_bytes(state: State) -> bool:
+    """Judge whether this run's bundle describes the bytes the release ships.
+
+    A bundle attests the artefacts one run built. Reconciliation can instead
+    publish bytes an earlier run built — PyPI's, or an existing release
+    asset's — because those are canonical and are never overwritten. Attaching
+    this run's bundle then would put a provenance claim on the release that its
+    own assets contradict, so the bundle is withheld unless every name's
+    canonical bytes are the ones this run built and attested.
+
+    Parameters
+    ----------
+    state : State
+        The run's artefacts and both destinations' holdings.
+
+    Returns
+    -------
+    bool
+        Whether every name's canonical bytes were built by this run. A name
+        whose canonical source reported no digest fails the check, because the
+        bundle cannot be shown to describe it.
+
+    """
+    for name in sorted(state.plan().canonical):
+        source, expected = canonical_digest(state, name)
+        if source is Source.LOCAL:
+            continue
+        if expected is None or sha256_of(state.publish / name) != expected:
+            return False
+    return True
+
+
+def missing_from_index(
+    expected: cabc.Iterable[str], listed: cabc.Collection[str]
+) -> list[str]:
+    """Return the names ``expected`` that one index response does not list.
+
+    Parameters
+    ----------
+    expected : collections.abc.Iterable[str]
+        The names the caller needs to see in the index.
+    listed : collections.abc.Collection[str]
+        The filenames the index response carries.
+
+    Returns
+    -------
+    list[str]
+        The expected names still absent, sorted; empty once the index agrees.
+
+    Examples
+    --------
+    >>> missing_from_index(["a.whl", "b.whl"], {"a.whl"})
+    ['b.whl']
+
+    """
+    return sorted(set(expected) - set(listed))
+
+
+def _copy_unattached_bundles(bundles: Path, state: State, output: Path) -> None:
+    """Copy the run's bundle into ``output`` when it attests what will ship.
+
+    Standard error is deliberate: standard output is the caller's TSV protocol.
+    """
+    unattached = sorted(
+        bundle for bundle in bundles.iterdir() if bundle.name not in state.github
+    )
+    if not unattached:
+        return
+    if not attests_canonical_bytes(state):
+        print(
+            "::notice::Not attaching this run's Sigstore bundle: the release "
+            "ships bytes another run built, so the bundle would attest a "
+            "different build. It remains in the attestation store.",
+            file=sys.stderr,
+        )
+        return
+    for bundle in unattached:
+        shutil.copyfile(bundle, output / bundle.name)
 
 
 def stage_github(state: State, bundles: Path, output: Path) -> list[tuple[str, str]]:
@@ -315,7 +405,7 @@ def stage_github(state: State, bundles: Path, output: Path) -> list[tuple[str, s
     fetch = _pypi_fetch_list(lacking, state.pypi)
     output.mkdir(parents=True, exist_ok=True)
     _copy_pypi_gap(lacking, state.pypi, state.publish, output)
-    _copy_unattached_bundles(bundles, state.github, output)
+    _copy_unattached_bundles(bundles, state, output)
     return fetch
 
 
@@ -326,9 +416,16 @@ def check_fetched(state: State, output: Path) -> None:
 
 
 def verify(state: State, bundles: Path) -> list[str]:
-    """Describe every artefact or bundle the two destinations disagree on."""
+    """Describe every artefact or bundle the two destinations disagree on.
+
+    A bundle is required only when it attests the bytes the release ships; see
+    :func:`attests_canonical_bytes`. A run that reconciles onto another run's
+    bytes cannot truthfully attach its own, and `verify` must not demand it.
+    """
     pypi = {name: file.sha256 for name, file in state.pypi.items()}
     problems = mismatches(local_names(state.publish), pypi, state.github)
+    if not attests_canonical_bytes(state):
+        return problems
     missing = sorted(
         bundle.name for bundle in bundles.iterdir() if bundle.name not in state.github
     )

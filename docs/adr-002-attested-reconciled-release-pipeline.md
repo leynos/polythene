@@ -132,16 +132,24 @@ There is no `--clobber` anywhere in the workflow: nothing is ever overwritten.
 
 Before `publish-release` un-drafts the release, it re-reads both the PyPI index
 and the release's asset list and confirms every artefact name has an identical
-SHA-256 digest on both sides, and that the run's Sigstore bundle is attached.
+SHA-256 digest on both sides, and that the run's Sigstore bundle is attached
+when that bundle describes the bytes the release ships.
+
 The PyPI index is fetched a second time immediately before the check rather
 than reused from the start of the job, because PyPI serves it through a CDN
 cache that can still omit a file `publish-pypi` has just uploaded; reusing the
 earlier copy would report that file as missing from PyPI and leave the release
-a draft. A name that already differs between the destinations makes
-`publish-release` fail and the release stays a draft. Recovery is deliberately
-manual: an administrator must delete the offending asset from the GitHub
-Release (PyPI's published files can never be deleted) so that a later run's
-reconciliation can proceed without ambiguity.
+a draft. That re-fetch does not stop at the first `200`: it repeats, within the
+same six-attempt budget, until the listing contains every name this run staged,
+and fails the step only when the budget runs out. A cache that is merely behind
+therefore delays the release rather than failing it, and the intermediate
+misses are logged as plain messages, not error annotations.
+
+A name that already differs between the destinations makes `publish-release`
+fail and the release stays a draft. Recovery is deliberately manual: an
+administrator must delete the offending asset from the GitHub Release (PyPI's
+published files can never be deleted) so that a later run's reconciliation can
+proceed without ambiguity.
 
 ### The `pypi` environment and Trusted Publishing
 
@@ -163,6 +171,16 @@ runner's `curl` cannot report `%{num_retries}`; the loop counts its own
 attempts. A `404` means the project does not exist yet and is read as an empty
 index; any other non-200 status fails the run rather than guessing.
 
+A `200` alone does not establish that the listing is current, because the
+response comes through a cache. A caller that sets `EXPECTED_PUBLISH` — only
+`publish-release`, whose re-fetch happens after the upload — spends the rest of
+that same budget asking until the listing contains every name in the directory,
+so the staleness that status cannot show is retried rather than trusted. The
+check runs in `scripts/release_assets_cli.py`, so the workflow keeps no
+filename knowledge of its own; its intermediate failures are printed without an
+Actions error annotation, because a miss the next attempt repairs is not a
+failure of the step.
+
 ### Attestations
 
 `attest` generates a build provenance attestation for every wheel and the
@@ -171,6 +189,18 @@ separately signs and uploads a PEP 740 attestation for each file it accepts.
 Both are kept: the build provenance attestation covers the run that produced
 the bytes, wherever they end up, while the PEP 740 attestation is PyPI's own
 record for its index.
+
+A bundle attests exactly the artefacts one run built. Reconciliation can
+instead ship bytes an earlier run built, because PyPI's files and existing
+release assets are canonical and are never overwritten; on a re-run whose
+rebuild differs, every canonical byte belongs to an earlier run. Attaching this
+run's bundle then would put a provenance claim on the release that its own
+assets contradict, so `publish-release` withholds the bundle unless every
+name's canonical bytes are the ones this run built and attested. Withholding is
+not a failure: the run's attestation still reaches the repository's attestation
+store, and `verify` requires a bundle only when one can be truthful. A name
+whose canonical source reports no digest also withholds the bundle, because the
+claim cannot be checked.
 
 ### Sdist cardinality on every pull request
 

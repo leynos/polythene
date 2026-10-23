@@ -12,6 +12,10 @@ checked-in step scripts execute unchanged against state the test controls:
   draft; defaults to ``true``, the state a first release run starts from.
 - ``FAKE_CURL_STATUSES``: comma-separated HTTP statuses the index returns in
   turn; the last repeats. Defaults to ``200``.
+- ``FAKE_CURL_STALE_AFTER``, ``FAKE_CURL_STALE_CALLS`` and
+  ``FAKE_CURL_STALE_NAMES``: which index responses serve a CDN-stale listing.
+  Counting from zero, responses after the first ``AFTER`` and for the next
+  ``CALLS`` calls omit every file named in ``NAMES``.
 
 Like the real services, neither stand-in ever overwrites a file it holds: a
 second upload of an existing asset name fails, as ``gh`` does without
@@ -106,17 +110,39 @@ def gh(args: list[str]) -> int:
     return 0
 
 
-def _next_status() -> str:
-    """Return the next scripted index status; the last one repeats."""
-    statuses = os.environ.get("FAKE_CURL_STATUSES", "200").split(",")
+def _index_serving() -> int:
+    """Return this response's index ordinal, counting from zero."""
     counter = Path(os.environ["FAKE_CALLS"]).with_suffix(".index-count")
     served = int(counter.read_text(encoding="utf-8")) if counter.exists() else 0
     counter.write_text(str(served + 1), encoding="utf-8")
+    return served
+
+
+def _next_status(served: int) -> str:
+    """Return the scripted index status for response ``served``; the last repeats."""
+    statuses = os.environ.get("FAKE_CURL_STATUSES", "200").split(",")
     return statuses[min(served, len(statuses) - 1)]
 
 
-def _index_json() -> str:
-    """Render the PyPI state as a PEP 691 JSON simple index."""
+def _is_stale(served: int) -> bool:
+    """Return whether response ``served`` models a cache that predates an upload."""
+    if "FAKE_CURL_STALE_AFTER" not in os.environ:
+        return False
+    after = int(os.environ["FAKE_CURL_STALE_AFTER"])
+    calls = int(os.environ.get("FAKE_CURL_STALE_CALLS", "1"))
+    return after <= served < after + calls
+
+
+def _index_json(*, stale: bool) -> str:
+    """Render the PyPI state as a PEP 691 JSON simple index.
+
+    A stale response is a CDN cache that has not yet noticed this run's
+    uploads: it lists the files as they were before, minus the names the test
+    says were just published.
+    """
+    hidden = (
+        set(os.environ.get("FAKE_CURL_STALE_NAMES", "").split(",")) if stale else set()
+    )
     files = [
         {
             "filename": path.name,
@@ -124,6 +150,7 @@ def _index_json() -> str:
             "hashes": {"sha256": _digest(path)},
         }
         for path in sorted(_directory("FAKE_PYPI_FILES").iterdir())
+        if path.name not in hidden
     ]
     return json.dumps({"name": "polythene-isolate", "files": files})
 
@@ -132,8 +159,10 @@ def curl(args: list[str]) -> int:
     """Serve the index or one file, writing ``%{http_code}`` if asked."""
     url, output = args[-1], Path(args[args.index("--output") + 1])
     if url == _INDEX_URL:
-        status = _next_status()
-        output.write_text(_index_json() if status == "200" else "{}", encoding="utf-8")
+        served = _index_serving()
+        status = _next_status(served)
+        document = _index_json(stale=_is_stale(served)) if status == "200" else "{}"
+        output.write_text(document, encoding="utf-8")
         print(status, end="")
         # curl exits non-zero, still writing `000`, when nothing answered.
         return 7 if status == "000" else 0
