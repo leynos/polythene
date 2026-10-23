@@ -587,14 +587,14 @@ path rather than to the empty string. Beyond the tool-check:
 
 Five workflows run from `.github/workflows/`.
 
-| Workflow                   | Job                | Purpose                               |
-| -------------------------- | ------------------ | ------------------------------------- |
-| `ci.yml`                   | `lint-test`        | The pull-request and `main` gate      |
-|                            | `wheel-build`      | Assert the build makes one sdist      |
-| `coverage-main.yml`        | `coverage-upload`  | The `main`-only coverage publisher    |
-| `mutation-testing.yml`     | `mutation`         | The scheduled mutation-testing caller |
-| `dependabot-automerge.yml` | `automerge`        | Auto-merge Dependabot pull requests   |
-| `release.yml`              | six release jobs   | Publish a tagged release              |
+| Workflow                   | Job               | Purpose                               |
+| -------------------------- | ----------------- | ------------------------------------- |
+| `ci.yml`                   | `lint-test`       | The pull-request and `main` gate      |
+|                            | `wheel-build`     | Assert the build makes one sdist      |
+| `coverage-main.yml`        | `coverage-upload` | The `main`-only coverage publisher    |
+| `mutation-testing.yml`     | `mutation`        | The scheduled mutation-testing caller |
+| `dependabot-automerge.yml` | `automerge`       | Auto-merge Dependabot pull requests   |
+| `release.yml`              | six release jobs  | Publish a tagged release              |
 
 `ci.yml` runs on pushes to `main` and on every pull request, with
 `contents: read`. Its steps install Python 3.13 and `uv`, run
@@ -608,15 +608,15 @@ explicit `make test` or pytest step: the tests run inside the shared
 `publish-artefact: 'false'`. The contract target runs before the tooling that
 follows it, so a broken pin fails the job early rather than after the installs.
 
-`ci.yml` also declares `wheel-build`, which runs the same
-`pure-python-wheel` composite action as the release and then fails unless the
-build produced exactly one sdist and one wheel. The release ships the sdist
-alongside the wheel, so a pull request that produced none, or two, fails here
-rather than at tag time.
+`ci.yml` also declares `wheel-build`, which runs the same `pure-python-wheel`
+composite action as the release and then fails unless the build produced
+exactly one sdist and one wheel. The release ships the sdist alongside the
+wheel, so a pull request that produced none, or two, fails here rather than at
+tag time.
 
 `release.yml` triggers on `v*.*.*` tags and is described under
-[Publishing a release](#publishing-a-release). Its six jobs are
-`check-version`, `build-wheels`, `attest`, `draft-release`, `publish-pypi`, and
+[Publishing a release](#publishing-a-release). Its six jobs are `check-version`,
+`build-wheels`, `attest`, `draft-release`, `publish-pypi`, and
 `publish-release`; the release uploads to PyPI through Trusted Publishing and
 publishes a GitHub Release with the attested files and their Sigstore bundle.
 This project has no C or Rust extensions, so the one pure Python wheel and the
