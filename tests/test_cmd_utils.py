@@ -120,19 +120,19 @@ def test_run_cmd_foreground_overrides_inherit_stdin(tmp_path: Path) -> None:
 
 def test_run_cmd_rejects_string_commands() -> None:
     """Passing a bare string raises an informative :class:`TypeError`."""
-    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
         run_cmd(typ.cast("typ.Any", "echo oops"))
 
-    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
         run_cmd(typ.cast("typ.Any", b"echo oops"))
 
-    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
         run_cmd(typ.cast("typ.Any", bytearray(b"echo oops")))
 
-    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
         run_cmd(typ.cast("typ.Any", 12345))
 
-    with pytest.raises(TypeError, match="plumbum invocation or pipeline"):
+    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
         run_cmd(typ.cast("typ.Any", None))
 
 

@@ -138,7 +138,7 @@ def run_cmd(
     """
     timeout = _merge_timeout(timeout, run_kwargs)
     if not isinstance(cmd, SupportsFormulate):
-        msg = "Command must be a plumbum invocation or pipeline"
+        msg = "Command must satisfy SupportsFormulate (formulate() and __call__())"
         raise TypeError(msg)
 
     print(f"$ {cmd}", file=sys.stderr)
