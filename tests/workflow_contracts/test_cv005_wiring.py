@@ -18,7 +18,8 @@ import tomllib
 from pathlib import Path
 
 import yaml
-from plumbum import local
+
+from tests.support.process import run_command
 
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = "leynos/polythene"
@@ -46,8 +47,9 @@ def _make_n(target: str) -> str:
     pytest contracts.
 
     """
-    with local.cwd(ROOT):
-        return local["make"]("-n", target)
+    outcome = run_command(["make", "-n", target], cwd=ROOT)
+    assert outcome.exit_code == 0, f"make -n {target} failed: {outcome.stderr}"
+    return outcome.stdout or ""
 
 
 def _pinned_commit() -> str:

@@ -8,10 +8,9 @@ import os
 import typing as typ
 from pathlib import Path
 
-from plumbum.commands.base import BaseCommand
-from plumbum.commands.processes import ProcessExecutionError
+from cuprum import CommandResult, SafeCmdBuilder
 
-from .cmd_utils import run_cmd
+from .cmd_utils import CommandOutcome, fail_on_error, failure_detail, run_cmd
 from .script_utils import ensure_directory, get_command
 
 __all__ = [
@@ -35,7 +34,7 @@ class BackendContext:
     container_tmp: Path
 
 
-PrepareFn = typ.Callable[[BaseCommand, Path, str], list[str] | None]
+PrepareFn = typ.Callable[[SafeCmdBuilder, Path, str], list[str] | None]
 PrepareFactory = typ.Callable[[BackendContext], PrepareFn]
 
 
@@ -60,22 +59,24 @@ def _is_privileged_user() -> bool:
     return geteuid() == 0
 
 
+def _reports_permission_denied(outcome: CommandOutcome) -> bool:
+    """Return ``True`` when ``outcome`` failed for lack of user namespaces.
+
+    A kernel that forbids unprivileged user namespaces makes ``bwrap`` fail
+    with ``EPERM`` and a "Permission denied" diagnostic. That is a host
+    property rather than a fault in the probe, so it is recognised here and
+    turns into a fallback instead of a logged failure.
+    """
+    if fail_on_error(outcome) == 0:
+        return False
+    stderr = outcome.stderr if isinstance(outcome, CommandResult) else None
+    return "Permission denied" in (stderr or "")
+
+
 def _is_bwrap_perm_error(exc: Exception) -> bool:
     """Return ``True`` when ``exc`` indicates user namespace permissions."""
-    if isinstance(exc, ProcessExecutionError):
-        stderr = exc.stderr
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode(errors="ignore")
-        else:
-            stderr = stderr or ""
-        errno_value = getattr(exc, "errno", None)
-        if "Permission denied" in stderr:
-            return True
-        return "Permission denied" in str(exc) or errno_value == errno.EPERM
-
     if isinstance(exc, OSError):
         return exc.errno == errno.EPERM
-
     return False
 
 
@@ -120,11 +121,8 @@ class Backend:
             return None
 
         logger(f"Executing via {self.name}")
-        result = run_cmd(tool[tuple(args)], fg=True, timeout=timeout)
-        exit_code = (
-            int(typ.cast("typ.SupportsInt", result)) if result is not None else 0
-        )
-        return (self.name, exit_code)
+        outcome = run_cmd(tool(*args), fg=True, timeout=timeout)
+        return (self.name, fail_on_error(outcome))
 
 
 def ensure_runtime_paths(root: Path) -> None:
@@ -133,7 +131,7 @@ def ensure_runtime_paths(root: Path) -> None:
         ensure_directory(root / sub)
 
 
-def _probe_bwrap_userns(bwrap: BaseCommand, context: BackendContext) -> list[str]:
+def _probe_bwrap_userns(bwrap: SafeCmdBuilder, context: BackendContext) -> list[str]:
     logger = context.logger
     timeout = context.timeout
     if not _is_privileged_user():
@@ -148,34 +146,38 @@ def _probe_bwrap_userns(bwrap: BaseCommand, context: BackendContext) -> list[str
                 raise BubblewrapUnavailable(_BWRAP_SYSCTL_DISABLED)
 
     try:
-        run_cmd(
-            bwrap[
-                (
-                    "--unshare-user",
-                    "--uid",
-                    "0",
-                    "--gid",
-                    "0",
-                    "--bind",
-                    "/",
-                    "/",
-                    "true",
-                )
-            ],
+        outcome = run_cmd(
+            bwrap(
+                "--unshare-user",
+                "--uid",
+                "0",
+                "--gid",
+                "0",
+                "--bind",
+                "/",
+                "/",
+                "true",
+            ),
             fg=True,
             timeout=timeout,
         )
-    except (ProcessExecutionError, OSError) as exc:
+    except OSError as exc:
         if _is_bwrap_perm_error(exc):
             raise BubblewrapUnavailable(_BWRAP_PERMISSION_DENIED) from exc
         logger(f"User namespace probe failed: {exc}")
+        return []
+
+    if _reports_permission_denied(outcome):
+        raise BubblewrapUnavailable(_BWRAP_PERMISSION_DENIED)
+    if fail_on_error(outcome) != 0:
+        logger(f"User namespace probe failed: {failure_detail(outcome)}")
         return []
 
     return ["--unshare-user", "--uid", "0", "--gid", "0"]
 
 
 def _probe_bwrap_proc(
-    bwrap: BaseCommand,
+    bwrap: SafeCmdBuilder,
     base_flags: list[str],
     root: Path,
     *,
@@ -191,8 +193,10 @@ def _probe_bwrap_proc(
         "true",
     ]
     try:
-        run_cmd(bwrap[tuple(probe)], fg=True, timeout=timeout)
-    except (ProcessExecutionError, SystemExit, OSError):
+        outcome = run_cmd(bwrap(*probe), fg=True, timeout=timeout)
+    except (FileNotFoundError, SystemExit, OSError):
+        return []
+    if fail_on_error(outcome) != 0:
         return []
     return ["--proc", "/proc"]
 
@@ -202,7 +206,7 @@ def make_prepare_bwrap(context: BackendContext) -> PrepareFn:
     container_tmp = context.container_tmp
 
     def _prepare_bwrap(
-        bwrap: BaseCommand,
+        bwrap: SafeCmdBuilder,
         root: Path,
         inner_cmd: str,
     ) -> list[str] | None:
@@ -232,8 +236,10 @@ def make_prepare_bwrap(context: BackendContext) -> PrepareFn:
             "true",
         ]
         try:
-            run_cmd(bwrap[tuple(probe_args)], fg=True, timeout=timeout)
-        except (ProcessExecutionError, SystemExit, OSError):
+            outcome = run_cmd(bwrap(*probe_args), fg=True, timeout=timeout)
+        except (FileNotFoundError, SystemExit, OSError):
+            return None
+        if fail_on_error(outcome) != 0:
             return None
 
         return [
@@ -261,14 +267,16 @@ def make_prepare_proot(context: BackendContext) -> PrepareFn:
     timeout = context.timeout
 
     def _prepare_proot(
-        proot: BaseCommand,
+        proot: SafeCmdBuilder,
         root: Path,
         inner_cmd: str,
     ) -> list[str] | None:
         probe_args = ["-R", str(root), "-0", "/bin/sh", "-c", "true"]
         try:
-            run_cmd(proot[tuple(probe_args)], fg=True, timeout=timeout)
-        except (ProcessExecutionError, SystemExit, OSError):
+            outcome = run_cmd(proot(*probe_args), fg=True, timeout=timeout)
+        except (FileNotFoundError, SystemExit, OSError):
+            return None
+        if fail_on_error(outcome) != 0:
             return None
         return ["-R", str(root), "-0", "/bin/sh", "-c", inner_cmd]
 
@@ -279,14 +287,16 @@ def make_prepare_chroot(context: BackendContext) -> PrepareFn:
     timeout = context.timeout
 
     def _prepare_chroot(
-        chroot: BaseCommand,
+        chroot: SafeCmdBuilder,
         root: Path,
         inner_cmd: str,
     ) -> list[str] | None:
         probe_args = [str(root), "/bin/sh", "-c", "true"]
         try:
-            run_cmd(chroot[tuple(probe_args)], fg=True, timeout=timeout)
-        except (ProcessExecutionError, SystemExit, OSError):
+            outcome = run_cmd(chroot(*probe_args), fg=True, timeout=timeout)
+        except (FileNotFoundError, SystemExit, OSError):
+            return None
+        if fail_on_error(outcome) != 0:
             return None
         return [
             str(root),

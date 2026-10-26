@@ -9,8 +9,11 @@ authors = [
     {name = "Polythene Contributors"},
 ]
 dependencies = [
+    # Pinned exactly: cuprum is pre-release, so a range would admit a beta this
+    # suite has not exercised. `tests/workflow_contracts/test_cuprum_pin.py`
+    # holds the pin, the lock, and the installed version together.
+    "cuprum==0.2.0b2",
     "cyclopts>=4.25,<6.0",
-    "plumbum>=1.8,<2.0",
     "uuid6>=2025.0.1",
 ]
 classifiers = [
@@ -135,8 +138,12 @@ datetime = "dt"
 typing = "typ"
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"subprocess.run".msg = "Use `plumbum` instead of `subprocess.run`"
-"subprocess.check_call".msg = "Use `plumbum` instead of `subprocess.check_call`"
+# Cuprum is the only sanctioned way to start an external process. The few test
+# helpers that must cross a real process boundary (a scrubbed environment, or a
+# CLI entry point) opt out with a reasoned `noqa` naming this rule.
+"subprocess.run".msg = "Use `cuprum` instead of `subprocess.run`"
+"subprocess.check_call".msg = "Use `cuprum` instead of `subprocess.check_call`"
+"subprocess.Popen".msg = "Use `cuprum` instead of `subprocess.Popen`"
 
 [tool.mutmut]
 source_paths = ["polythene/"]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import sysconfig
 import typing as typ
@@ -17,6 +16,7 @@ import pytest
 import polythene
 import polythene.isolation as isolation
 from tests.support.cli import CliResult
+from tests.support.process import run_command, to_cli_result
 
 __all__ = [
     "CliResult",
@@ -67,20 +67,12 @@ def _subprocess_environment(empty_bin: Path) -> dict[str, str]:
 def _run_process(command: list[str], environment: dict[str, str]) -> CliResult:
     """Run a CLI entry point and capture its process boundary."""
     # The fixed fixture commands must cross a real process boundary here.
-    completed = subprocess.run(  # noqa: S603, TID251
+    outcome = run_command(
         command,
-        capture_output=True,
-        check=False,
         cwd=Path(__file__).resolve().parents[1],
         env=environment,
-        text=True,
-        timeout=30,
     )
-    return CliResult(
-        exit_code=completed.returncode,
-        stdout=completed.stdout,
-        stderr=completed.stderr,
-    )
+    return to_cli_result(outcome)
 
 
 def _capture_cli_result(invoke: typ.Callable[[], object]) -> CliResult:

@@ -16,11 +16,14 @@ import os
 import pathlib as pth
 import shutil
 import stat
-import subprocess
 import sys
 import typing as typ
 
 from tests.helpers.ci_workflows import ROOT, steps
+from tests.support.process import run_command
+
+if typ.TYPE_CHECKING:
+    from cuprum import CommandResult
 
 WORKFLOW = "release.yml"
 _FAKE_TOOLS = pth.Path(__file__).with_name("release_fake_tools.py")
@@ -56,7 +59,7 @@ def step_script(job_name: str, name: str, *, workflow: str = WORKFLOW) -> str:
 
 def run_bash(
     script: str, cwd: pth.Path, env: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
+) -> CommandResult:
     """Run ``script`` under Bash in ``cwd`` with ``env`` layered over ours.
 
     ``BASH_ENV`` is dropped rather than forwarded. Bash sources the file it
@@ -68,8 +71,10 @@ def run_bash(
 
     Returns
     -------
-    subprocess.CompletedProcess[str]
+    cuprum.CommandResult
         The completed process, with standard output and error captured as text.
+        A failing step is reported in ``exit_code``; callers check it rather
+        than catching.
 
     """
     bash = shutil.which("bash", path=os.defpath)
@@ -79,13 +84,10 @@ def run_bash(
     environment: dict[str, str] = dict(os.environ)
     environment.pop("BASH_ENV", None)
     environment.update(env or {})
-    return subprocess.run(  # noqa: S603, TID251 - the fixed Bash executable runs the repository's checked-in workflow code; `plumbum` cannot supply a per-call environment as simply.
+    return run_command(
         [typ.cast("str", bash), "-c", script],
-        capture_output=True,
-        check=False,
         cwd=cwd,
         env=environment,
-        text=True,
     )
 
 
@@ -161,7 +163,7 @@ def fake_release(root: pth.Path) -> FakeRelease:
 
 def run_version_check(
     cwd: pth.Path, declared: str, tag_version: str
-) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
+) -> tuple[CommandResult, dict[str, str]]:
     """Run ``check-version``'s pyproject.toml step for one declared version.
 
     ``tag_version`` is the version the tag names, without its ``v``; the step
