@@ -71,9 +71,7 @@ def test_a_matching_tag_passes_and_reports_its_prerelease_status(
     """The tag-derived version must equal the declared one, in either spelling."""
     completed, written = run_version_check(tmp_path, version, version)
 
-    assert completed.exit_code == 0, (completed.stdout or "") + (
-        completed.stderr or ""
-    )
+    assert completed.exit_code == 0, (completed.stdout or "") + (completed.stderr or "")
     assert written == {"prerelease": expected_prerelease}, (
         f"{version} must be reported as prerelease={expected_prerelease}"
     )

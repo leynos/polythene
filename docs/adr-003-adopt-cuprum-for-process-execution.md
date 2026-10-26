@@ -14,7 +14,7 @@ pinned to one exact pre-release, `cuprum==0.2.0b2`.
 
 Polythene started its sandbox probes, image pulls, and exports through
 `subprocess`, wrapped by a helper that raised `ProcessExecutionError` on a
-non-zero status. The helper echoed the command, normalised signal-derived
+non-zero status. The helper echoed the command, normalized signal-derived
 negative statuses, and translated a failure into an exception the CLI caught
 and turned into an exit code. Behaviour therefore lived in the call sites: a
 caller that wanted to *read* a probe's status had to opt into a different
