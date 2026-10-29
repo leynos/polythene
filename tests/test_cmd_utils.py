@@ -305,6 +305,36 @@ def test_command_result_rejects_a_pipeline_result() -> None:
         command_result(outcome)
 
 
+def test_pipeline_names_the_consumer_that_died_under_a_live_producer() -> None:
+    """The failing stage is the consumer, even when the producer outlives it.
+
+    This is the shape ``export_rootfs`` has: a producer still writing when the
+    consumer gives up on its input, which is what cuprum's own stage bookkeeping
+    has to attribute correctly. The recording double used by the export tests
+    scripts ``failure_index``; only a real pipeline can show that cuprum
+    reports the same thing, so a drift in that attribution fails here rather
+    than silently making the export report the wrong command.
+    """
+    # The producer keeps writing far longer than the consumer reads, so the
+    # consumer is the one that fails while its input is still arriving.
+    producer = _payload(
+        "import sys, time\n"
+        "for _ in range(200):\n"
+        "    sys.stdout.write('garbage' * 4000)\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.005)\n",
+    )
+    consumer = _payload("import sys; sys.exit(3)")
+
+    outcome = run_cmd(producer | consumer)
+
+    assert isinstance(outcome, PipelineResult)
+    assert outcome.failure_index == 1
+    assert outcome.stages[0].ok
+    assert fail_on_error(outcome) == 3
+    assert failure_detail(outcome) == "stage 1 (exit status 3)"
+
+
 def test_failure_detail_reports_one_for_an_outcome_that_succeeded() -> None:
     """A successful outcome reads as status 1, matching ``_normalize_retcode``.
 
