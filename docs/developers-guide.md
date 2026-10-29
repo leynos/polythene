@@ -278,10 +278,13 @@ that any of the three blocks network access.
 
 ### Process execution
 
-Cuprum is the only way Polythene starts a process, and `cmd_utils.py` is the
-only production module that touches it; the test support under
+Cuprum is the only way Polythene starts a process. `cmd_utils.py` owns the
+shared catalogue and execution entry point; other production modules consume
+its helpers and name cuprum's types, `backends.py` importing `CommandResult` and
+`SafeCmdBuilder` directly and `script_utils.py` and `isolation.py` naming
+`SafeCmdBuilder` in annotations. The test support under
 [Testing strategy](#testing-strategy) builds cuprum values as well, so that the
-suite starts children the same way. Two decisions live there.
+suite starts children the same way. Two decisions live in `cmd_utils.py`.
 
 **The catalogue decides what may run.** `POLYTHENE_CATALOGUE` curates exactly
 the executables the package starts: `podman`, `tar`, `bwrap`, `proot`, and
