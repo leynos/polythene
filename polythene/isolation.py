@@ -229,13 +229,22 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
             raise SystemExit(fail_on_error(exported))
     finally:
         # Removing the container is housekeeping; the export's outcome is the
-        # one the caller needs to see, so a failed `rm` must not mask it.
-        run_cmd(
-            podman("rm", cid),
-            fg=True,
-            timeout=timeout,
-            stdout=os.devnull,
-        )
+        # one the caller needs to see, so a failed `rm` must not mask it. A
+        # non-zero status is data and is only reported, but `run_cmd` can also
+        # raise — a timeout or an unresolvable binary — while the export's
+        # `SystemExit` is still in flight, and that exception would replace it.
+        try:
+            removed = run_cmd(
+                podman("rm", cid),
+                fg=True,
+                timeout=timeout,
+                stdout=os.devnull,
+            )
+        except OSError as exc:
+            _error(f"Failed to remove container {cid}: {exc}")
+        else:
+            if fail_on_error(removed):
+                _error(f"Failed to remove container {cid}: {failure_detail(removed)}")
 
     # Metadata (best-effort, does not affect functionality)
     meta = dest / ".polythene-meta"

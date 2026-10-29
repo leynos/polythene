@@ -54,7 +54,7 @@ def flatten(cmd: SafeCmd | Pipeline) -> tuple[str, ...]:
 
 def result(
     cmd: SafeCmd | Pipeline,
-    exit_code: int,
+    exit_code: int | tuple[int, ...],
     stdout: str = "",
     stderr: str = "",
 ) -> CommandOutcome:
@@ -63,25 +63,37 @@ def result(
     Pipeline stages other than the last hand their output to the next stage,
     so cuprum reports ``None`` for them; the double mirrors that rather than
     inventing captured text no real run would produce.
+
+    A pipeline accepts one code per stage, which is how a test says that
+    ``tar`` failed while ``podman export`` succeeded. Splatting a single code
+    across every stage would blame the first one, and ``failure_index`` — the
+    thing ``failure_detail`` and ``fail_on_error`` read — would point at the
+    wrong stage.
     """
     stages = _stages(cmd)
+    codes = (exit_code,) * len(stages) if isinstance(exit_code, int) else exit_code
+    if len(codes) != len(stages):
+        msg = f"{len(codes)} exit codes for a {len(stages)}-stage command"
+        raise ValueError(msg)
     results = tuple(
         CommandResult(
             program=stage.program,
             argv=stage.argv,
-            exit_code=exit_code,
+            exit_code=code,
             pid=0,
             stdout=stdout if index == len(stages) - 1 else None,
             stderr=stderr,
         )
-        for index, stage in enumerate(stages)
+        for index, (stage, code) in enumerate(zip(stages, codes, strict=True))
     )
     if isinstance(cmd, SafeCmd):
         return results[0]
-    return PipelineResult(
-        stages=results,
-        failure_index=0 if exit_code != 0 else None,
-    )
+    return PipelineResult(stages=results, failure_index=_first_failure(codes))
+
+
+def _first_failure(codes: tuple[int, ...]) -> int | None:
+    """Return the index of the first non-zero code, or ``None``."""
+    return next((index for index, code in enumerate(codes) if code), None)
 
 
 @dc.dataclass(slots=True, frozen=True)
@@ -110,8 +122,12 @@ class CommandRecord:
         return f"{rendered}{suffix}"
 
 
-ScriptedOutcome = tuple[int, str, str] | BaseException
-"""What a test can script for one call: a result triple, or an exception to raise."""
+ScriptedOutcome = tuple[int | tuple[int, ...], str, str] | BaseException
+"""What a test can script for one call, or an exception to raise.
+
+A result triple's first element is either one status for every stage or, for a
+pipeline, one status per stage in order.
+"""
 
 
 @dc.dataclass(slots=True)

@@ -290,6 +290,34 @@ def test_probe_bwrap_userns_permission_denied(
         )
 
 
+def test_probe_bwrap_userns_captures_stderr(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The probe captures stderr, because that is where the refusal arrives.
+
+    A foreground run hands ``bwrap`` the caller's descriptor, so cuprum reports
+    ``stderr=None`` and permission-denied detection could never fire. The probe
+    runs captured instead: its diagnostics are read by the caller, not by the
+    terminal.
+    """
+    foreground: list[bool] = []
+
+    def fake_run_cmd(cmd: SafeCmd, *, fg: bool = False, **_: object) -> object:
+        foreground.append(fg)
+        return _outcome(cmd, 1, "", "bwrap: Permission denied")
+
+    monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
+    monkeypatch.setattr(backends, "_is_privileged_user", lambda: True)
+
+    with pytest.raises(backends.BubblewrapUnavailable, match="unprivileged"):
+        backends._probe_bwrap_userns(
+            typ.cast("SafeCmdBuilder", _StubTool("bwrap")),
+            _make_context(container_tmp=tmp_path),
+        )
+
+    assert foreground == [False], "the probe must capture stderr to read it"
+
+
 def test_probe_bwrap_userns_oserror_eperm(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -146,6 +146,10 @@ def _probe_bwrap_userns(bwrap: SafeCmdBuilder, context: BackendContext) -> list[
                 raise BubblewrapUnavailable(_BWRAP_SYSCTL_DISABLED)
 
     try:
+        # Captured, not foreground: a kernel that forbids unprivileged user
+        # namespaces explains itself on the child's stderr, and an inherited
+        # descriptor would send that diagnosis to the terminal instead of to
+        # the detection below and to ``failure_detail``.
         outcome = run_cmd(
             bwrap(
                 "--unshare-user",
@@ -158,7 +162,6 @@ def _probe_bwrap_userns(bwrap: SafeCmdBuilder, context: BackendContext) -> list[
                 "/",
                 "true",
             ),
-            fg=True,
             timeout=timeout,
         )
     except OSError as exc:

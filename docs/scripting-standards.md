@@ -221,8 +221,11 @@ import sys
 
 from cuprum import Program, ProgramCatalogue, RunOutputOptions, sh
 
+# Every program the examples below build must be here: cuprum refuses an
+# unlisted name when the command is constructed, before anything is spawned.
 CATALOGUE = ProgramCatalogue.from_programs(
     Program("git"), Program("grep"), Program("sed"), Program("wc"),
+    Program("make"), Program("echo"), Program("sleep"),
     name="repo",
 )
 

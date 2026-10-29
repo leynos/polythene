@@ -302,6 +302,32 @@ def failure_detail(outcome: CommandOutcome) -> str:
     Cuprum reports failures as data, so there is no exception to render. The
     captured stderr carries the tool's own diagnostic when one was written;
     otherwise the exit status is all there is to report.
+
+    A pipeline names the stage that actually failed and its index, because a
+    caller told only "exit status 1" cannot tell a broken archive from a
+    missing container. A foreground run captures nothing, so its detail is the
+    status alone.
+
+    Parameters
+    ----------
+    outcome : CommandOutcome
+        A single command's :class:`cuprum.CommandResult` or a
+        :class:`cuprum.PipelineResult`. A successful outcome is accepted, but
+        its detail then reads as an exit status of ``0``.
+
+    Returns
+    -------
+    str
+        A single line: ``exit status N`` for a command, optionally followed by
+        ``: DETAIL`` when stderr was captured, or
+        ``stage N (exit status M)`` for a pipeline's failing stage, again with
+        ``: DETAIL`` appended when the stage's stderr was captured.
+
+    Examples
+    --------
+    >>> failure_detail(run_cmd(program("false")("false")))  # doctest: +SKIP
+    'exit status 1'
+
     """
     if isinstance(outcome, PipelineResult):
         failed = outcome.failure
@@ -323,10 +349,26 @@ def command_result(outcome: CommandOutcome) -> CommandResult:
     Callers that read a captured stream need the shape a single command
     returns; a pipeline's per-stage results would answer a different question.
 
+    Parameters
+    ----------
+    outcome : CommandOutcome
+        The result :func:`run_cmd` returned. A single command's result is
+        returned unchanged.
+
+    Returns
+    -------
+    cuprum.CommandResult
+        ``outcome`` itself, narrowed from the union.
+
     Raises
     ------
     TypeError
         If ``outcome`` is a pipeline result.
+
+    Examples
+    --------
+    >>> command_result(run_cmd(program("true")("true"))).exit_code  # doctest: +SKIP
+    0
 
     """
     if isinstance(outcome, CommandResult):
@@ -363,8 +405,8 @@ def fail_on_error(outcome: CommandOutcome) -> int:
     -------
     int
         ``0`` when everything succeeded; otherwise the failing command's exit
-        status, normalized so a signal-derived negative value still exits
-        non-zero.
+        status. A signal-derived negative value is returned unchanged, because
+        it is already non-zero; only a missing or zero code becomes ``1``.
 
     Examples
     --------

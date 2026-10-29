@@ -116,7 +116,7 @@ The `polythene/` package holds seven modules:
 | `__main__.py`     | Module entry point                                    | `main`                                                                                                                                                                                           |
 | `isolation.py`    | CLI, configuration, store layout, image export        | `app`, `cmd_pull`, `cmd_exec`, `export_rootfs`, `generate_uuid`, `store_path_for`, `log`, `DEFAULT_STORE`, `CONTAINER_TMP`, `VERBOSE`, `IS_ROOT`, `BACKENDS`, `IsolationName`, `ISOLATION_NAMES` |
 | `backends.py`     | Backend descriptors and availability probes           | `Backend`, `BackendContext`, `BubblewrapUnavailable`, `create_backends`, `ensure_runtime_paths`, `make_prepare_bwrap`, `make_prepare_proot`, `make_prepare_chroot`                               |
-| `cmd_utils.py`    | Process execution and echoing                         | `run_cmd`, `TimeoutConflictError`                                                                                                                                                                |
+| `cmd_utils.py`    | Process execution and echoing                         | `POLYTHENE_CATALOGUE`, `program`, `run_cmd`, `fail_on_error`, `failure_detail`, `command_result`                                                                                                 |
 | `script_utils.py` | Command resolution and filesystem helpers             | `get_command`, `ensure_exists`, `ensure_directory`, `unique_match`, `PKG_DIR`                                                                                                                    |
 | `session.py`      | Argument-vector construction for programmatic callers | `PolytheneSession`, `SandboxRunner`                                                                                                                                                              |
 
@@ -150,8 +150,9 @@ them: a backend's non-zero status from `cmd_exec`, and an unexpected probe
 status, each become the CLI's exit code, as do the statuses of `podman pull` and
 `podman create`. Cuprum returns a non-zero exit as data rather than raising, so
 `fail_on_error` performs that translation once and every caller uses it: a
-signal-derived negative status is normalized to a non-zero positive one, and
-anything without a usable code becomes `1`.
+signal-derived negative status is passed through unchanged, so it still exits
+non-zero, and anything without a usable code — `0` or `None` where a failure
+was expected — becomes `1`.
 
 The export pipeline is not an exception. `podman export CID | tar -C DEST -x`
 runs inside a `try/finally` that only removes the container, and its result is
@@ -278,7 +279,9 @@ that any of the three blocks network access.
 ### Process execution
 
 Cuprum is the only way Polythene starts a process, and `cmd_utils.py` is the
-only module that touches it. Two decisions live there.
+only production module that touches it; the test support under
+[Testing strategy](#testing-strategy) builds cuprum values as well, so that the
+suite starts children the same way. Two decisions live there.
 
 **The catalogue decides what may run.** `POLYTHENE_CATALOGUE` curates exactly
 the executables the package starts: `podman`, `tar`, `bwrap`, `proot`, and
@@ -341,8 +344,9 @@ sees the terminal rather than an immediate EOF.
 
 `failure_detail` renders a one-line diagnostic from a result: the captured
 stderr when the tool wrote one, otherwise just the exit status. The status
-itself comes from `fail_on_error`, which normalizes a signal-derived negative
-value to a non-zero positive one and treats a missing code as `1`.
+itself comes from `fail_on_error`, which passes a signal-derived negative value
+through unchanged — it is already non-zero, which is all the shell needs — and
+treats a missing code as `1`.
 
 A pipeline needs one extra rule. Cuprum kills a stage once its input dies, so a
 pipeline that failed early has two candidate statuses: the failing stage

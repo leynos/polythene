@@ -6,6 +6,7 @@ import os
 import typing as typ
 
 import pytest
+from cuprum import TimeoutExpired
 
 import polythene.isolation as isolation
 from tests.support.podman import CommandRecord, RecordingTools, install_recording_tools
@@ -234,3 +235,54 @@ def test_export_rootfs_uses_one_podman_command_for_probe_and_create(
     probe = tools.podman.find("image", "exists")[0]
     create = tools.podman.find("create")[0]
     assert probe.argv[0] == create.argv[0] == tools.podman.binary
+
+
+def test_export_rootfs_cleanup_failure_does_not_mask_export_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Cleanup is housekeeping, so its own failure must not replace the export.
+
+    ``run_cmd`` returns a non-zero exit as data, so a failed ``rm`` cannot mask
+    anything. It can still *raise* — a timeout or an unresolvable binary — and
+    that happens while the export's ``SystemExit`` is in flight. The caller
+    must keep the export's status and diagnostic either way.
+    """
+    tools = install_recording_tools(monkeypatch)
+    tools.podman.script("image", "exists", outcome=(0, "", ""))
+    _script_create(tools)
+    tools.podman.script("export", outcome=(1, "", "tar: write error"))
+    tools.podman.script(
+        "rm",
+        outcome=TimeoutExpired(cmd=("podman", "rm", CONTAINER_ID), timeout=30),
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        _run_export(tmp_path, timeout=30)
+
+    assert excinfo.value.code == 1
+    stderr = capsys.readouterr().err
+    assert f"Failed to export rootfs of {CONTAINER_ID}" in stderr
+    assert "tar: write error" in stderr
+    assert "Failed to remove container" in stderr
+
+
+def test_export_rootfs_reports_the_stage_that_actually_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A ``tar`` failure is reported as ``tar``, not as the ``podman`` stage."""
+    tools = install_recording_tools(monkeypatch)
+    tools.podman.script("image", "exists", outcome=(0, "", ""))
+    _script_create(tools)
+    tools.podman.script("export", outcome=((0, 1), "", "tar: write error"))
+
+    with pytest.raises(SystemExit) as excinfo:
+        _run_export(tmp_path)
+
+    assert excinfo.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "stage 1 (exit status 1)" in stderr
+    assert "tar: write error" in stderr

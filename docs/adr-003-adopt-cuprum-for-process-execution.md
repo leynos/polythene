@@ -67,7 +67,9 @@ non-zero exit as data on `CommandResult`; carries `cwd` and environment on an
 
 ## Decision outcome
 
-`polythene/cmd_utils.py` is the only module that touches cuprum. It owns:
+`polythene/cmd_utils.py` is the only *production* module that touches cuprum;
+the test support described under [Testing](#testing) builds cuprum values too.
+It owns:
 
 - `POLYTHENE_CATALOGUE`, the `ProgramCatalogue` naming every executable the
   package starts: `podman`, `tar`, `bwrap`, `proot`, and `chroot`;
