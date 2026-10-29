@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import inspect
 import os
+import re
 import sys
 import typing as typ
 
@@ -19,6 +21,7 @@ from cuprum import (
     TimeoutExpired,
 )
 
+from polythene import cmd_utils
 from polythene.cmd_utils import (
     POLYTHENE_CATALOGUE,
     command_result,
@@ -300,6 +303,61 @@ def test_command_result_rejects_a_pipeline_result() -> None:
 
     with pytest.raises(TypeError, match="expected a single command result"):
         command_result(outcome)
+
+
+def test_failure_detail_reports_one_for_an_outcome_that_succeeded() -> None:
+    """A successful outcome reads as status 1, matching ``_normalize_retcode``.
+
+    ``failure_detail`` documents a successful outcome as an ``exit status``
+    with no detail, and the value it renders is the normalized one. A caller
+    that prints the detail to excuse a failure needs it to describe what
+    ``fail_on_error`` would return, not the raw zero.
+    """
+    outcome = command_result(run_cmd(_payload("")))
+
+    assert outcome.ok
+    assert fail_on_error(outcome) == 0
+    assert failure_detail(outcome) == "exit status 1"
+
+
+def test_failure_detail_reports_one_for_a_pipeline_that_succeeded() -> None:
+    """A pipeline with no failing stage renders the same normalized status."""
+    outcome = run_cmd(_payload("") | probe("cat"))
+
+    assert isinstance(outcome, PipelineResult)
+    assert outcome.ok
+    assert failure_detail(outcome) == "exit status 1"
+
+
+def test_documented_examples_name_only_catalogued_programs() -> None:
+    """Every ``program(...)`` in the public docstrings must build.
+
+    A ``doctest: +SKIP`` example still teaches a caller a call they may copy,
+    so an uncatalogued name there fails at their prompt rather than here.
+    """
+    documented = _documented_program_names()
+
+    assert documented, "no program(...) calls found in the module docstrings"
+    for name in documented:
+        program(name)  # raises UnknownProgramError for an uncurated name
+
+
+def _documented_program_names() -> set[str]:
+    """Return the program names the public docstrings' examples pass to ``program``."""
+    pattern = re.compile(r"""program\(\s*["']([^"']+)["']""")
+
+    names: set[str] = set()
+    for docstring in _public_docstrings():
+        names.update(pattern.findall(docstring))
+    return names
+
+
+def _public_docstrings() -> typ.Iterator[str]:
+    """Yield the docstring of every public function ``cmd_utils`` exports."""
+    for name in cmd_utils.__all__:
+        member = getattr(cmd_utils, name)
+        if inspect.isfunction(member) and member.__doc__:
+            yield member.__doc__
 
 
 def test_polythene_catalogue_covers_every_program_the_package_starts() -> None:

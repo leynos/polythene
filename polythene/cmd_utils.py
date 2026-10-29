@@ -271,7 +271,7 @@ def run_cmd(  # noqa: PLR0913 - one entry point; splitting it would scatter the 
 
     Examples
     --------
-    >>> run_cmd(program("echo")("hi"), fg=True).exit_code  # doctest: +SKIP
+    >>> run_cmd(program("podman")("--version"), fg=True).exit_code  # doctest: +SKIP
     0
 
     """
@@ -312,8 +312,11 @@ def failure_detail(outcome: CommandOutcome) -> str:
     ----------
     outcome : CommandOutcome
         A single command's :class:`cuprum.CommandResult` or a
-        :class:`cuprum.PipelineResult`. A successful outcome is accepted, but
-        its detail then reads as an exit status of ``0``.
+        :class:`cuprum.PipelineResult`. Nothing stops a successful outcome
+        being passed, but there is then nothing to explain, and the status it
+        renders still goes through :func:`fail_on_error`'s normalization: a
+        success reads as ``exit status 1``, not ``exit status 0``. Call this
+        only for an outcome that failed.
 
     Returns
     -------
@@ -325,8 +328,17 @@ def failure_detail(outcome: CommandOutcome) -> str:
 
     Examples
     --------
-    >>> failure_detail(run_cmd(program("false")("false")))  # doctest: +SKIP
+    A captured command that failed reports its own diagnostic:
+
+    >>> probe = program("podman")("image", "exists", "absent")  # doctest: +SKIP
+    >>> failure_detail(run_cmd(probe))  # doctest: +SKIP
     'exit status 1'
+
+    A pipeline names the stage that broke, not the last one:
+
+    >>> broken = program("podman")("--version") | program("tar")("-x")  # doctest: +SKIP
+    >>> failure_detail(run_cmd(broken)).splitlines()[0]  # doctest: +SKIP
+    'stage 1 (exit status 2): tar: This does not look like a tar archive'
 
     """
     if isinstance(outcome, PipelineResult):
@@ -367,8 +379,20 @@ def command_result(outcome: CommandOutcome) -> CommandResult:
 
     Examples
     --------
-    >>> command_result(run_cmd(program("true")("true"))).exit_code  # doctest: +SKIP
-    0
+    A single command's result narrows to itself, so its captured stream is
+    readable:
+
+    >>> probe = program("podman")("image", "exists", "absent")  # doctest: +SKIP
+    >>> command_result(run_cmd(probe)).exit_code  # doctest: +SKIP
+    1
+
+    A pipeline is refused, because a per-stage result is not the one shape:
+
+    >>> both = program("podman")("--version") | program("tar")("-t")  # doctest: +SKIP
+    >>> command_result(run_cmd(both))  # doctest: +SKIP
+    Traceback (most recent call last):
+    ...
+    TypeError: expected a single command result, got a pipeline result
 
     """
     if isinstance(outcome, CommandResult):
@@ -410,7 +434,8 @@ def fail_on_error(outcome: CommandOutcome) -> int:
 
     Examples
     --------
-    >>> fail_on_error(run_cmd(program("false")("false")))  # doctest: +SKIP
+    >>> probe = program("podman")("image", "exists", "absent")  # doctest: +SKIP
+    >>> fail_on_error(run_cmd(probe))  # doctest: +SKIP
     1
 
     """
