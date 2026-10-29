@@ -7,6 +7,7 @@ import inspect
 import os
 import re
 import sys
+import time
 import typing as typ
 
 import pytest
@@ -305,6 +306,17 @@ def test_command_result_rejects_a_pipeline_result() -> None:
         command_result(outcome)
 
 
+#: Seconds the producer in the live-producer test spends writing. Cuprum's
+#: pure-Python pump gives an upstream stage only ``_POST_CLOSE_DRAIN_TIMEOUT_S``
+#: (0.25 s in cuprum 0.2.0b2) to reach EOF once the downstream stage closes,
+#: and then stops relaying without killing the producer. A producer that
+#: outlives that window is left blocked on a pipe, so the pipeline never
+#: settles. This budget stays inside the window while still outlasting the
+#: consumer's interpreter startup, which is what puts the two in flight
+#: together.
+_PRODUCER_BUDGET_S = 0.20
+
+
 def test_pipeline_names_the_consumer_that_died_under_a_live_producer() -> None:
     """The failing stage is the consumer, even when the producer outlives it.
 
@@ -314,25 +326,98 @@ def test_pipeline_names_the_consumer_that_died_under_a_live_producer() -> None:
     scripts ``failure_index``; only a real pipeline can show that cuprum
     reports the same thing, so a drift in that attribution fails here rather
     than silently making the export report the wrong command.
+
+    The producer stops on a wall-clock budget rather than a loop count. A count
+    tuned for this machine would drift past cuprum's drain window on a slower
+    one, turning the test into a hang instead of a failure; the budget below
+    bounds the workload itself. The consumer's own startup is measured
+    separately in ``test_live_producer_test_overlaps_its_consumer``.
     """
-    # The producer keeps writing far longer than the consumer reads, so the
-    # consumer is the one that fails while its input is still arriving.
+    # The producer writes until its budget runs out, which is well after the
+    # consumer has rejected its input, so the consumer is the stage that fails
+    # while input is still arriving.
     producer = _payload(
         "import sys, time\n"
-        "for _ in range(200):\n"
+        f"end = time.monotonic() + {_PRODUCER_BUDGET_S}\n"
+        "while time.monotonic() < end:\n"
         "    sys.stdout.write('garbage' * 4000)\n"
         "    sys.stdout.flush()\n"
-        "    time.sleep(0.005)\n",
+        "    time.sleep(0.002)\n",
     )
     consumer = _payload("import sys; sys.exit(3)")
 
-    outcome = run_cmd(producer | consumer)
+    outcome = run_cmd(producer | consumer, timeout=30)
 
     assert isinstance(outcome, PipelineResult)
     assert outcome.failure_index == 1
     assert outcome.stages[0].ok
     assert fail_on_error(outcome) == 3
     assert failure_detail(outcome) == "stage 1 (exit status 3)"
+
+
+def test_live_producer_test_overlaps_its_consumer() -> None:
+    """The producer budget must outlast the consumer's startup.
+
+    The test above only proves what it claims while both stages are in flight:
+    a producer that finished before the consumer even started would leave the
+    consumer reading end-of-file, which is a different shape. Measuring the
+    consumer's startup here keeps that assumption honest, and fails loudly if a
+    slower interpreter or a heavier startup path erodes the margin.
+    """
+    started = time.monotonic()
+    outcome = command_result(run_cmd(_payload("import sys; sys.exit(3)"), timeout=30))
+    startup = time.monotonic() - started
+
+    assert outcome.exit_code == 3
+    assert startup < _PRODUCER_BUDGET_S, (
+        f"consumer startup {startup:.3f}s no longer fits inside the "
+        f"{_PRODUCER_BUDGET_S}s producer budget, so the two stages may not "
+        "overlap; raise the budget within cuprum's drain window or shorten "
+        "the consumer"
+    )
+
+
+def test_pipeline_settles_on_the_pure_python_stream_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pipeline must build the same answer whatever stream backend runs it.
+
+    cuprum dispatches its stream pump to a Rust extension when one is
+    installed and to a pure-Python fallback otherwise. Only the fallback
+    enforces the bounded post-close drain, and a producer that outlives it is
+    left blocked on a pipe, so a pipeline that settles under Rust can hang
+    under Python. The test above runs whichever backend this host resolved;
+    this one pins the fallback so a change that only works on the fast path
+    fails here instead of on a machine without the extension.
+    """
+    from cuprum import _backend, rust
+
+    if not rust.is_rust_available():
+        # Pinning the fallback is what this test adds, so on a host that
+        # already runs it there is nothing left to distinguish.
+        return
+
+    monkeypatch.setattr(_backend, "_RUST_AVAILABILITY_FOR_TESTING", False)
+    monkeypatch.setattr(_backend, "_check_rust_available", lambda: False)
+    monkeypatch.setattr(
+        _backend, "get_stream_backend", lambda: _backend.StreamBackend.PYTHON
+    )
+
+    producer = _payload(
+        "import sys, time\n"
+        f"end = time.monotonic() + {_PRODUCER_BUDGET_S}\n"
+        "while time.monotonic() < end:\n"
+        "    sys.stdout.write('garbage' * 4000)\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.002)\n",
+    )
+    consumer = _payload("import sys; sys.exit(3)")
+
+    outcome = run_cmd(producer | consumer, timeout=30)
+
+    assert isinstance(outcome, PipelineResult)
+    assert outcome.failure_index == 1
+    assert fail_on_error(outcome) == 3
 
 
 def test_failure_detail_reports_one_for_an_outcome_that_succeeded() -> None:
