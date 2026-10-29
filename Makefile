@@ -118,6 +118,8 @@ ACTIONLINT ?= actionlint
 
 # yamllint reads `.yamllint.yml`, which extends `.yamllint-estate.yml`, and
 # resolves that path against the working directory, so it runs from the root.
+yamllint: SHELL := /bin/bash
+yamllint: .SHELLFLAGS := -o pipefail -c
 yamllint: ## Lint every tracked YAML file strictly
 	git ls-files -z '*.yml' '*.yaml' | xargs -0 -r $(YAMLLINT) --strict --
 

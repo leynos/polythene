@@ -47,6 +47,7 @@ def run(program: str, *arguments: str, cwd: Path) -> subprocess.CompletedProcess
         name: value
         for name, value in os.environ.items()
         if name not in {"MAKEFLAGS", "MAKELEVEL", "MFLAGS", "MAKEOVERRIDES"}
+        and not name.startswith("GIT_")
     }
     return subprocess.run(  # noqa: S603, TID251
         [executable, *arguments],
@@ -188,3 +189,26 @@ def test_the_real_yamllint_fails_strictly_on_a_tracked_warning_only(
     assert "bad.yml" in failing.stdout, failing.stdout
     assert "untracked-bad.yml" not in failing.stdout, failing.stdout
     assert passing.returncode == 0, passing.stdout
+
+
+def test_yamllint_fails_when_git_cannot_read_index(tmp_path: Path) -> None:
+    """A broken index must fail before the linter is invoked."""
+    repo = git_repo(tmp_path / "repo", {"a.yml": "a: 1\n"}, {})
+    (repo / ".git" / "index").write_bytes(b"broken")
+    tool = fake_tool(tmp_path / "yamllint", 0)
+    result = run_make("yamllint", repo, YAMLLINT=str(tool))
+    assert result.returncode != 0
+    assert not Path(f"{tool}.log").exists()
+
+
+def test_git_repository_environment_is_not_inherited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Temporary repositories cannot modify an inherited repository index."""
+    outer = git_repo(tmp_path / "outer", {"outer.yml": "a: 1\n"}, {})
+    monkeypatch.setenv("GIT_DIR", str(outer / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(outer))
+    inner = git_repo(tmp_path / "inner", {"inner.yml": "b: 2\n"}, {})
+    result = run("git", "ls-files", cwd=inner)
+    assert result.stdout.splitlines() == ["inner.yml"]
+    assert run("git", "ls-files", cwd=outer).stdout.splitlines() == ["outer.yml"]
