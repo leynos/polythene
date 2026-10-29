@@ -174,8 +174,8 @@ def test_the_real_yamllint_fails_strictly_on_a_tracked_warning_only(
     """A tracked finding fails the gate and an untracked one does not."""
     repo = git_repo(
         tmp_path / "repo",
-        {"good.yml": "key: value\n", "bad.yml": "key: value \n"},
-        {"untracked-bad.yml": "key: value \n"},
+        {"good.yml": "key: value\n", "bad.yml": "enabled: yes\n"},
+        {"untracked-bad.yml": "enabled: yes\n"},
     )
     for name in (".yamllint-estate.yml", ".yamllint.yml"):
         shutil.copy(REPO_ROOT / name, repo / name)

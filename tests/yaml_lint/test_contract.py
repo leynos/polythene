@@ -23,11 +23,39 @@ from .support import (
     jobs,
 )
 
+GUARDED = (
+    "lint: yamllint actionlint\n"
+    "yamllint:\n"
+    "\tgit ls-files -z '*.yml' '*.yaml' >\"$$tmp\" && \\\n"
+    '\txargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"\n'
+    "actionlint:\n\t$(ACTIONLINT)\n"
+)
+
 
 @pytest.mark.parametrize(
     ("makefile", "wired"),
     [
         pytest.param(GOOD, True, id="wired"),
+        pytest.param(GUARDED, True, id="guarded"),
+        pytest.param(
+            GUARDED.replace("\tgit ls-files", "\t-git ls-files") + GUARDED,
+            False,
+            id="guarded bypass alongside sound command",
+        ),
+        *[
+            pytest.param(
+                GUARDED.replace(f"\t{command}", f"\t{prefix}{command}"),
+                False,
+                id=f"guarded {command} prefixed {prefix}",
+            )
+            for command in ("git ls-files", "xargs")
+            for prefix in ("-", "@-", "! ")
+        ],
+        pytest.param(
+            GOOD.replace("--strict --\n", "--strict -- || :\n"),
+            False,
+            id="yamllint failure ignored by colon",
+        ),
         pytest.param(GOOD.replace(" --strict", ""), False, id="not strict"),
         pytest.param(GOOD.replace(" '*.yaml'", ""), False, id="one pathspec"),
         pytest.param(
@@ -123,6 +151,11 @@ def test_the_gate_judgement_detects_each_defect(makefile: str, *, wired: bool) -
         ),
         pytest.param(
             gate(f"- uses: {PINNED}", "- run: make lint || true"), False, id="ignored"
+        ),
+        pytest.param(
+            gate(f"- uses: {PINNED}", "- run: make lint || :"),
+            False,
+            id="ignored by colon",
         ),
         pytest.param(
             gate(
