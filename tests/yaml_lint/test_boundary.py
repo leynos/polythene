@@ -212,3 +212,20 @@ def test_git_repository_environment_is_not_inherited(
     result = run("git", "ls-files", cwd=inner)
     assert result.stdout.splitlines() == ["inner.yml"]
     assert run("git", "ls-files", cwd=outer).stdout.splitlines() == ["outer.yml"]
+
+
+def test_yamllint_does_not_run_after_partial_git_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed enumeration must not send even partial output to the linter."""
+    repo = git_repo(tmp_path / "repo", {"a.yml": "a: 1\n"}, {})
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    git = bindir / "git"
+    git.write_text("#!/bin/sh\nprintf 'a.yml\\0'\nexit 1\n", encoding="utf-8")
+    git.chmod(git.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    tool = fake_tool(tmp_path / "yamllint", 0)
+    result = run_make("yamllint", repo, YAMLLINT=str(tool))
+    assert result.returncode != 0
+    assert not Path(f"{tool}.log").exists()

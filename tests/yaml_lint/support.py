@@ -214,7 +214,20 @@ def gate_is_wired(makefile: str) -> bool:
     actionlint = any(
         line.startswith("$(ACTIONLINT)") and not is_bypassed(line) for line in lines
     )
-    return actionlint and any(is_sound_yamllint(line) for line in lines)
+    staged = " ".join(lines)
+    guarded_yamllint = (
+        all(
+            part in staged
+            for part in (
+                "git ls-files -z '*.yml' '*.yaml' >\"$$tmp\" &&",
+                'xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"',
+            )
+        )
+        and "|| true" not in staged
+    )
+    return actionlint and (
+        guarded_yamllint or any(is_sound_yamllint(line) for line in lines)
+    )
 
 
 def is_job_header(line: str) -> bool:
