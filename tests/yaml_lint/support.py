@@ -162,7 +162,7 @@ def is_bypassed(line: str) -> bool:
 
     """
     return bool(
-        line.startswith(("-", "!", "@-")) or re.search(r"\|\|\s*(true|:)\b|;", line)
+        line.startswith(("-", "!", "@-")) or re.search(r"\|\|\s*(?:true\b|:)|;", line)
     )
 
 
@@ -214,17 +214,16 @@ def gate_is_wired(makefile: str) -> bool:
     actionlint = any(
         line.startswith("$(ACTIONLINT)") and not is_bypassed(line) for line in lines
     )
-    staged = " ".join(lines)
-    guarded_yamllint = (
-        all(
-            part in staged
-            for part in (
-                "git ls-files -z '*.yml' '*.yaml' >\"$$tmp\" &&",
-                'xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"',
-            )
-        )
-        and "|| true" not in staged
+    guarded_commands = (
+        "git ls-files -z '*.yml' '*.yaml' >\"$$tmp\" &&",
+        'xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"',
     )
+    matching_lines = [
+        line for line in lines if any(c in line for c in guarded_commands)
+    ]
+    guarded_yamllint = all(
+        any(command in line for line in matching_lines) for command in guarded_commands
+    ) and all(not is_bypassed(line) for line in matching_lines)
     return actionlint and (
         guarded_yamllint or any(is_sound_yamllint(line) for line in lines)
     )
