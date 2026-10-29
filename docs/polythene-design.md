@@ -64,6 +64,10 @@ sequenceDiagram
 - **Backend registry:** Encapsulates the bubblewrap, proot, and chroot
   integrations with shared probing and directory preparation helpers to remove
   duplicated logic.
+- **Process execution:** A curated cuprum catalogue names every executable the
+  package may start, and one helper runs them. The decision and its
+  consequences are recorded in
+  [ADR 003](adr-003-adopt-cuprum-for-process-execution.md).
 - **Script utilities:** Provide filesystem and command helpers that are safe to
   consume both from installed packages and from ad-hoc scripts shipped in the
   repository.
@@ -73,8 +77,9 @@ sequenceDiagram
 - **Deterministic fallbacks:** The backend probe order is deterministic so test
   outcomes remain reproducible even when multiple tools are available on the
   same host.
-- **Minimal dependencies:** The project leans on Cyclopts and Plumbum to keep
-  the CLI expressive without introducing heavyweight orchestration layers.
+- **Minimal dependencies:** The project leans on Cyclopts for the CLI and cuprum
+  for process execution, keeping the interface expressive without introducing
+  heavyweight orchestration layers.
 - **Documentation-first:** Behavioural specifications (pytest-bdd scenarios)
   describe the expected workflows, ensuring documentation and implementation
   stay aligned.

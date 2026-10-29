@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import os
 import shlex
-import subprocess
 import sys
 import tempfile
 import time
@@ -15,14 +14,14 @@ from pathlib import Path
 
 import cyclopts
 from cyclopts import App, Parameter
-from plumbum.commands.processes import ProcessExecutionError
 from uuid6 import uuid7
 
 from .backends import Backend, BackendContext, create_backends, ensure_runtime_paths
+from .cmd_utils import command_result, fail_on_error, failure_detail
 from .script_utils import ensure_directory, get_command, run_cmd
 
 if typ.TYPE_CHECKING:
-    from plumbum.commands.base import BaseCommand
+    from cuprum import SafeCmdBuilder
 
 # -------------------- Configuration --------------------
 
@@ -119,22 +118,15 @@ def _error(message: str) -> None:
     print(message, file=sys.stderr)
 
 
-def _normalize_retcode(retcode: int | None) -> int:
-    """Return a sensible exit status when a command lacks a numeric code."""
-    if not retcode:
-        return 1
-    return int(retcode)
-
-
 def _local_image_exists(
-    podman: BaseCommand,
+    podman: SafeCmdBuilder,
     image: str,
     timeout: int | None,
 ) -> bool:
     """Report whether ``image`` is present in the active Podman store.
 
     Uses ``podman image exists`` so the probe never contacts a registry. The
-    probe runs through the same resolved ``podman`` command as container
+    probe runs through the same resolved ``podman`` builder as container
     creation, so both see the caller's Podman store.
 
     Returns
@@ -151,18 +143,13 @@ def _local_image_exists(
         so the failure is not mistaken for a missing image.
 
     """
-    result = run_cmd(
-        podman["image", "exists", image],
-        timeout=timeout,
-        retcode=None,
-    )
-    retcode, _stdout, stderr = typ.cast("tuple[int, str, str]", result)
-    if retcode == 0:
+    result = command_result(run_cmd(podman("image", "exists", image), timeout=timeout))
+    if result.exit_code == 0:
         return True
-    if retcode == 1:
+    if result.exit_code == 1:
         return False
-    _error(f"Failed to check for local image {image}: {stderr.strip()}")
-    raise SystemExit(_normalize_retcode(retcode))
+    _error(f"Failed to check for local image {image}: {(result.stderr or '').strip()}")
+    raise SystemExit(fail_on_error(result))
 
 
 def log(msg: str) -> None:
@@ -193,10 +180,10 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
     against that same store, so ``exec`` stays offline afterwards.
 
     ``pull`` and ``rm`` report the image and container ID on stdout, so both
-    run with stdout sunk to :data:`subprocess.DEVNULL`. That keeps the caller's
-    stdout free for ``cmd_pull``'s single UUID line, which is the documented
-    contract. Every other step here writes nothing to stdout and inherits the
-    streams unchanged.
+    run with stdout sunk to :data:`os.devnull`. That keeps the caller's stdout
+    free for ``cmd_pull``'s single UUID line, which is the documented contract.
+    Every other step here writes nothing to stdout and inherits the streams
+    unchanged.
     """
     podman = get_command("podman")
     tar = get_command("tar")
@@ -208,49 +195,56 @@ def export_rootfs(image: str, dest: Path, *, timeout: int | None = None) -> None
         _error(f"Using local image {image}")
     else:
         log(f"Pulling {image} …")
-        try:
-            run_cmd(
-                podman["pull", image],
-                fg=True,
-                timeout=timeout,
-                stdout=subprocess.DEVNULL,
-            )
-        except ProcessExecutionError as exc:
-            _error(f"Failed to pull image {image}: {exc}")
-            raise SystemExit(_normalize_retcode(exc.retcode)) from exc
+        pulled = run_cmd(
+            podman("pull", image),
+            fg=True,
+            timeout=timeout,
+            stdout=os.devnull,
+        )
+        if fail_on_error(pulled):
+            _error(f"Failed to pull image {image}: {failure_detail(pulled)}")
+            raise SystemExit(fail_on_error(pulled))
 
     ensure_directory(dest, exist_ok=False)
 
-    # Create a stopped container to export its rootfs
-    try:
-        create_result = run_cmd(
-            podman["create", "--pull=never", image, "true"],
-            timeout=timeout,
-        )
-        cid_output = (
-            create_result[1] if isinstance(create_result, tuple) else create_result
-        )
-        cid = str(cid_output).strip()
-    except ProcessExecutionError as exc:
-        _error(f"Failed to create container from {image}: {exc}")
-        raise SystemExit(_normalize_retcode(exc.retcode)) from exc
+    # Create a stopped container, then export its rootfs
+    created = command_result(
+        run_cmd(podman("create", "--pull=never", image, "true"), timeout=timeout)
+    )
+    if not created.ok:
+        _error(f"Failed to create container from {image}: {failure_detail(created)}")
+        raise SystemExit(fail_on_error(created))
+    cid = (created.stdout or "").strip()
     try:
         log(f"Exporting rootfs of {cid} → {dest}")
-        # Pipe: podman export CID | tar -C dest -x
-        # plumbum pipes stream in FG without buffering the whole archive
-        run_cmd(
-            (podman["export", cid] | tar["-C", str(dest), "-x"]),
+        # Cuprum streams a pipeline stage-by-stage without buffering the whole
+        # archive, so `podman export` never has to fit in memory.
+        exported = run_cmd(
+            podman("export", cid) | tar("-C", str(dest), "-x"),
             fg=True,
             timeout=timeout,
         )
+        if fail_on_error(exported):
+            _error(f"Failed to export rootfs of {cid}: {failure_detail(exported)}")
+            raise SystemExit(fail_on_error(exported))
     finally:
-        with contextlib.suppress(ProcessExecutionError):
-            run_cmd(
-                podman["rm", cid],
+        # Removing the container is housekeeping; the export's outcome is the
+        # one the caller needs to see, so a failed `rm` must not mask it. A
+        # non-zero status is data and is only reported, but `run_cmd` can also
+        # raise — a timeout or an unresolvable binary — while the export's
+        # `SystemExit` is still in flight, and that exception would replace it.
+        try:
+            removed = run_cmd(
+                podman("rm", cid),
                 fg=True,
                 timeout=timeout,
-                stdout=subprocess.DEVNULL,
+                stdout=os.devnull,
             )
+        except OSError as exc:
+            _error(f"Failed to remove container {cid}: {exc}")
+        else:
+            if fail_on_error(removed):
+                _error(f"Failed to remove container {cid}: {failure_detail(removed)}")
 
     # Metadata (best-effort, does not affect functionality)
     meta = dest / ".polythene-meta"
@@ -340,14 +334,11 @@ def cmd_exec(
     for index, backend in enumerate(selected_backends):
         if backend.requires_root and not IS_ROOT:
             continue
-        try:
-            outcome = backend.run(
-                root,
-                inner_cmd,
-                context=context,
-            )
-        except ProcessExecutionError as exc:
-            raise SystemExit(_normalize_retcode(exc.retcode)) from exc
+        outcome = backend.run(
+            root,
+            inner_cmd,
+            context=context,
+        )
         if outcome is None:
             next_backend = _next_available_backend(index + 1)
             if next_backend is not None:

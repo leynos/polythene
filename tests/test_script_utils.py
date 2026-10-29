@@ -5,11 +5,47 @@ from __future__ import annotations
 import typing as typ
 
 import pytest
+from cuprum import SafeCmd
 
 from polythene import script_utils
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
+
+
+def test_get_command_returns_a_builder_for_an_installed_tool() -> None:
+    """A curated tool on ``PATH`` comes back as a builder for real commands."""
+    command = script_utils.get_command("tar")("-tf", "archive.tar")
+
+    assert isinstance(command, SafeCmd)
+    assert command.argv_with_program == ("tar", "-tf", "archive.tar")
+
+
+def test_get_command_exits_127_when_the_tool_is_missing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A missing binary keeps the documented exit status and diagnostic.
+
+    Cuprum resolves an executable when the command runs, so without the check
+    the failure would surface as a traceback from inside a probe instead of
+    the CLI's own one-line message.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        script_utils.get_command("polythene-definitely-not-installed")
+
+    assert excinfo.value.code == 127
+    assert (
+        "Required command not found: polythene-definitely-not-installed"
+        in capsys.readouterr().err
+    )
+
+
+def test_get_command_rejects_a_program_the_catalogue_does_not_curate() -> None:
+    """``PATH`` is not the only gate; the catalogue must admit the name too."""
+    from cuprum import UnknownProgramError
+
+    with pytest.raises(UnknownProgramError, match="not in the catalogue"):
+        script_utils.get_command("cat")
 
 
 def test_ensure_directory_creates_path(tmp_path: Path) -> None:

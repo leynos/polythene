@@ -17,9 +17,12 @@ Polythene is a small package arranged in three cooperating layers:
   chroot — as data, together with the probes that decide whether each one can
   run.
 - `cmd_utils.py` and `script_utils.py` hold the process and filesystem helpers
-  the other two layers share: `run_cmd` executes and echoes a plumbum command,
-  `get_command` resolves a binary or exits `127`, and `ensure_directory`
-  creates the store and runtime directories.
+  the other two layers share. `cmd_utils.py` owns `POLYTHENE_CATALOGUE` — the
+  curated list of every executable the package may start — together with
+  `program`, which turns a curated name into a cuprum builder, and `run_cmd`,
+  which echoes and then runs a command. `script_utils.py` adds `get_command`,
+  which checks `PATH` and exits `127`, and `ensure_directory`, which creates
+  the store and runtime directories.
 
 `isolation.py` computes its configuration when the module is imported, not when
 a command runs:
@@ -113,7 +116,7 @@ The `polythene/` package holds seven modules:
 | `__main__.py`     | Module entry point                                    | `main`                                                                                                                                                                                           |
 | `isolation.py`    | CLI, configuration, store layout, image export        | `app`, `cmd_pull`, `cmd_exec`, `export_rootfs`, `generate_uuid`, `store_path_for`, `log`, `DEFAULT_STORE`, `CONTAINER_TMP`, `VERBOSE`, `IS_ROOT`, `BACKENDS`, `IsolationName`, `ISOLATION_NAMES` |
 | `backends.py`     | Backend descriptors and availability probes           | `Backend`, `BackendContext`, `BubblewrapUnavailable`, `create_backends`, `ensure_runtime_paths`, `make_prepare_bwrap`, `make_prepare_proot`, `make_prepare_chroot`                               |
-| `cmd_utils.py`    | Process execution and echoing                         | `run_cmd`, `TimeoutConflictError`                                                                                                                                                                |
+| `cmd_utils.py`    | Process execution and echoing                         | `POLYTHENE_CATALOGUE`, `program`, `run_cmd`, `fail_on_error`, `failure_detail`, `command_result`                                                                                                 |
 | `script_utils.py` | Command resolution and filesystem helpers             | `get_command`, `ensure_exists`, `ensure_directory`, `unique_match`, `PKG_DIR`                                                                                                                    |
 | `session.py`      | Argument-vector construction for programmatic callers | `PolytheneSession`, `SandboxRunner`                                                                                                                                                              |
 
@@ -145,14 +148,19 @@ Exit codes are few and deliberate:
 Other statuses are propagated rather than translated in the places that handle
 them: a backend's non-zero status from `cmd_exec`, and an unexpected probe
 status, each become the CLI's exit code, as do the statuses of `podman pull` and
-`podman create`, which are caught as `ProcessExecutionError` and passed through
-`_normalize_retcode`.
+`podman create`. Cuprum returns a non-zero exit as data rather than raising, so
+`fail_on_error` performs that translation once and every caller uses it: a
+signal-derived negative status is passed through unchanged, so it still exits
+non-zero, and anything without a usable code — `0` or `None` where a failure
+was expected — becomes `1`.
 
-The export pipeline is the exception. `podman export CID | tar -C DEST -x` runs
-inside a `try/finally` that only removes the container; there is no
-`except ProcessExecutionError`, so a failed export leaks plumbum's exception
-instead of translating it, and the interpreter's traceback exit status is what
-the caller observes rather than the failing command's status.
+The export pipeline is not an exception. `podman export CID | tar -C DEST -x`
+runs inside a `try/finally` that only removes the container, and its result is
+handed to `fail_on_error` like every other command's, so a failed export exits
+with the *failing stage's* status and prints `Failed to export rootfs of CID`.
+Cuprum kills the final stage once its input dies, so the final stage's status
+is signal-derived and says nothing about what went wrong; `fail_on_error`
+therefore reports the first failing stage rather than the last one.
 
 `PolytheneSession` builds an argument vector and hands it to its runner. It
 does not execute anything itself, does not create or clean the store, and does
@@ -167,14 +175,14 @@ not check that the UUID exists — all of that stays with the CLI.
    destination.
 3. `export_rootfs` resolves `podman` and `tar` through `get_command`, which
    exits `127` when either is missing.
-4. It probes local storage with `podman image exists IMAGE`, run with
-   `retcode=None` so the status is read rather than raised: `0` means the image
-   is present, `1` means it is absent, and anything else — `125` for unreadable
-   storage included — prints `Failed to check for local image IMAGE` and exits
-   with that status.
+4. It probes local storage with `podman image exists IMAGE`, captured rather
+   than inherited so the status is read rather than acted on: `0` means the
+   image is present, `1` means it is absent, and anything else — `125` for
+   unreadable storage included — prints `Failed to check for local image IMAGE`
+   and exits with that status.
 5. When the probe reports the image absent, it pulls with `podman pull IMAGE`
-   in the foreground; a `ProcessExecutionError` prints
-   `Failed to pull image IMAGE` and exits with the failing command's status.
+   in the foreground; a non-zero status prints `Failed to pull image IMAGE` and
+   exits with the failing command's status.
 6. It creates the destination directory with `exist_ok=False`.
 7. It creates a stopped container with `podman create --pull=never IMAGE true`,
    reads the container ID from that command's stdout, streams
@@ -185,24 +193,23 @@ not check that the UUID exists — all of that stays with the CLI.
    to stdout.
 
 Printing the UUID alone is a contract, so steps 5 and 7 sink `podman pull` and
-`podman rm` to `subprocess.DEVNULL`: those two report the image and container
-ID on stdout and would otherwise contaminate it. The `podman create` in step 7
-also writes a container ID to stdout, but there that output is the *intended*
-result rather than noise — it is read back and stripped into `cid`, which is
-why that call stays on the ordinary path.
+`podman rm` to `os.devnull`: those two report the image and container ID on
+stdout and would otherwise contaminate it. The `podman create` in step 7 also
+writes a container ID to stdout, but there that output is the *intended* result
+rather than noise — it is read back and stripped into `cid`, which is why that
+call stays on the ordinary path.
 
-The lifetimes are deliberately narrow. The container from step 7 is removed
-after the export when cleanup succeeds, but cleanup is best-effort only within
-one exception type. `contextlib.suppress(ProcessExecutionError)` catches a
-`podman rm` that exits non-zero; a cleanup that instead times out raises the
-builtin `TimeoutError`, which is not a `ProcessExecutionError`, so it escapes
-the suppression and propagates. The container can be left behind either way.
-The image is pulled at most once per `pull`, and the persistent artefacts are
-the exported directory and its metadata file. `--timeout` reaches every
-external command in the flow, so it bounds each operation rather than the
-export as a whole. A collision on the destination directory raises
-`FileExistsError`, which `cmd_pull` answers by generating a fresh UUID once and
-retrying.
+Cleanup is deliberately looser than the export it follows. The `podman rm` in
+the `finally` block runs through the same `run_cmd`, so a non-zero status is
+data rather than an exception: it is returned, and the block simply ignores it,
+because the export's outcome is the one the caller needs to see. A cleanup that
+times out raises `cuprum.TimeoutExpired` (a `TimeoutError`) instead, which does
+escape the `finally` block; the container can be left behind either way. The
+image is pulled at most once per `pull`, and the persistent artefacts are the
+exported directory and its metadata file. `--timeout` reaches every external
+command in the flow, so it bounds each operation rather than the export as a
+whole. A collision on the destination directory raises `FileExistsError`, which
+`cmd_pull` answers by generating a fresh UUID once and retrying.
 
 ### `polythene exec`
 
@@ -216,8 +223,7 @@ retrying.
 4. It walks the backend order, running each candidate. Python's `None` means
    the backend declined: the CLI logs the fallback and tries the next one. A
    `(name, status)` pair with status `0` returns, and any other status exits
-   with that code. A `ProcessExecutionError` from the backend exits with the
-   failing command's status.
+   with that code.
 5. If no backend ran, it prints
    `All isolation modes unavailable (bwrap/proot/chroot).` and exits `126`.
 
@@ -272,42 +278,90 @@ that any of the three blocks network access.
 
 ### Process execution
 
-`run_cmd` is the single place that starts an external command. It echoes
-`$ <command>` to stderr before running, requires the runtime-checkable
-`SupportsFormulate` protocol — an object exposing `formulate()` and
-`__call__()` — rejecting anything else with `TypeError`, and raises
-`TimeoutConflictError` when a timeout arrives both as an argument and in
-`**run_kwargs`.
+Cuprum is the only way Polythene starts a process. `cmd_utils.py` owns the
+shared catalogue and execution entry point; other production modules consume
+its helpers and name cuprum's types, `backends.py` importing `CommandResult` and
+`SafeCmdBuilder` directly and `script_utils.py` and `isolation.py` naming
+`SafeCmdBuilder` in annotations. The test support under
+[Testing strategy](#testing-strategy) builds cuprum values as well, so that the
+suite starts children the same way. Two decisions live in `cmd_utils.py`.
 
-A foreground call normally inherits the caller's streams. It leaves that path
-in two cases: a timeout is set, or the caller passes an explicit `stdin`,
-`stdout`, or `stderr` override. Both route through `_run_fg_with_overrides`,
-which drives `cmd.run(timeout=...)` rather than `FG` — `FG` hard-codes
-inherited streams and so cannot express an override. That helper then names all
-three streams explicitly, defaulting the ones the caller left unset to `None`.
-The `stdin` default is the load-bearing one: plumbum's `_popen` defaults an
-unspecified `stdin` to a pipe and `run_proc` drains it with `communicate()`, so
-omitting it would hand the child an immediate EOF instead of the caller's
-terminal. Because a timed call already takes this path, a `--timeout` run and a
-no-timeout run behave identically.
+**The catalogue decides what may run.** `POLYTHENE_CATALOGUE` curates exactly
+the executables the package starts: `podman`, `tar`, `bwrap`, `proot`, and
+`chroot`. `program(name)` asks cuprum for a builder for one of those names, and
+cuprum refuses a name the catalogue does not list *when the command is built*,
+so a typo in a backend's binary fails before any probe spawns. The check is on
+the name, not on `PATH`: `get_command` performs the `shutil.which` check
+separately, because cuprum resolves an executable only when the command runs
+and the CLI's documented missing-binary behaviour is the `127` exit with its
+one-line diagnostic.
+
+**`run_cmd` is the single place that starts a command.** It echoes
+`$ <command>` to stderr, runs the command through cuprum's `run_sync`, and
+returns the result. It accepts a cuprum `SafeCmd` or `Pipeline` and rejects
+anything else with a `TypeError` naming the correct form. Cuprum reports a
+non-zero exit as data rather than raising, so nothing here translates a failure
+into an exception; `fail_on_error` does that once, at the point where a caller
+needs a process status.
+
+The echo line is the reason the two entry points differ at all. `program()`
+rejects an uncurated name at build time; `get_command` checks `PATH` and exits
+`127` before building. Both return a builder, and every caller invokes it with
+the command's arguments — including when there are none, because the builder is
+not the command.
+
+#### Streams
+
+Cuprum does **not** inherit the parent's streams by default, which is the one
+behaviour that most easily surprises a caller arriving from `subprocess` or
+`plumbum`. With `capture` and `echo` both off, an unset target resolves to a
+library pipe whose far end nothing reads, so the child's output is discarded
+rather than passed through. Foreground execution therefore has to name
+`StdioTarget.inherit()` explicitly:
+
+- `fg=True` builds
+  `RunOutputOptions(capture=False, echo=False, stdout=…, stderr=…)` with
+  `StdioTarget.inherit()` for each stream the caller left unset. A path or
+  `StdioTarget` override replaces that stream.
+- `fg=False` builds `RunOutputOptions(capture=True, echo=False)` and returns
+  both streams on the result. Overrides are refused with a `ValueError`,
+  because a captured stream is a parent-side pipe that a redirected stream does
+  not have; cuprum rejects the combination too, and refusing it here names the
+  caller's own mistake.
+- A pipeline binds its intermediate streams across stages, so cuprum refuses a
+  `RunOutputOptions` stdio target for one outright. `run_cmd` therefore rejects
+  `stdout`/`stderr` for a pipeline with its own `ValueError`, and a foreground
+  pipeline can reach the caller only by echoing (`echo=True`).
 
 Stream overrides exist for callers that must keep a chatty tool off their own
-streams. `polythene pull` passes `stdout=subprocess.DEVNULL` for `podman pull`
-and `podman rm`, so the UUID stays the only line it prints. When a call is not
+streams. `polythene pull` passes `stdout=os.devnull` for `podman pull` and
+`podman rm`, so the UUID stays the only line it prints. When a call is not
 foreground, `run_cmd` returns the child's output to the caller instead of
 inheriting the terminal streams: the `podman image exists` probe and
 `podman create` are both non-foreground, and their callers read the result.
-Every foreground call inherits the streams unchanged.
+Every foreground call inherits the streams it did not explicitly redirect, and
+the child keeps the caller's stdin, so a foreground command that reads stdin
+sees the terminal rather than an immediate EOF.
 
-Timeout translation is confined to the foreground path. When `fg=True` and a
-timeout is set, plumbum's `ProcessTimedOut` is re-raised as the builtin
-`TimeoutError`. The non-foreground path forwards the timeout to `cmd.run`
-without that `except` clause, so a non-foreground call that times out — the
-`podman image exists` probe and `podman create` in `export_rootfs` are the two
-in this package — raises `ProcessTimedOut` to its caller rather than
-`TimeoutError`. `ProcessTimedOut` derives from `Exception`, not
-`ProcessExecutionError`, so the surrounding `except ProcessExecutionError`
-handlers do not catch it.
+#### Failures and timeouts
+
+`failure_detail` renders a one-line diagnostic from a result: the captured
+stderr when the tool wrote one, otherwise just the exit status. The status
+itself comes from `fail_on_error`, which passes a signal-derived negative value
+through unchanged — it is already non-zero, which is all the shell needs — and
+treats a missing code as `1`.
+
+A pipeline needs one extra rule. Cuprum kills a stage once its input dies, so a
+pipeline that failed early has two candidate statuses: the failing stage
+reports what went wrong — `tar` exits `1` on a truncated archive — while the
+final stage reports a signal-derived status because it was killed.
+`fail_on_error` returns the *failing* stage's status, and `failure_detail`
+names that stage and index.
+
+Timeouts raise `cuprum.TimeoutExpired`, which derives from `TimeoutError`. That
+is true for every call, foreground or captured, because cuprum raises it from
+`run_sync` rather than from a stream-specific path; there is no second
+exception type to catch.
 
 The `timeout` value travels with each operation rather than the invocation: in
 `pull` it reaches the probe, the pull, `create`, the export, and `rm`, and in
@@ -351,11 +405,13 @@ dotted path such as `tests.support.cli`, so a helper can be imported by name
 from anywhere in the suite. There is no `tests/unit/` directory.
 
 `tests/workflow_contracts/` is the exception. It has no `__init__.py`, so
-pytest imports its single module by the bare filename — `test_cv005_wiring`, not
+pytest imports each module by the bare filename — `test_cv005_wiring`, not
 `tests.workflow_contracts.test_cv005_wiring` — and puts the directory on
-`sys.path` to do it. Nothing in that module imports a sibling, so the two
+`sys.path` to do it. Nothing in those modules imports a sibling, so the two
 conventions do not collide; a helper added there would need the package
-treatment the rest of the suite uses.
+treatment the rest of the suite uses and would belong in `tests/helpers/`
+instead. The cuprum pin readers already live there, in
+`tests/helpers/cuprum_pin.py`, precisely because two modules assert on them.
 
 | Location                                        | Contents                                                                                                                                                            |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -366,18 +422,28 @@ treatment the rest of the suite uses.
 | `tests/support/`                                | Importable helpers: the `CliResult` type and the recording Podman doubles                                                                                           |
 | `tests/test_workflow_contract.py`               | Contract tests for the mutation-testing caller workflow                                                                                                             |
 | `tests/workflow_contracts/test_cv005_wiring.py` | Contract tests for the CV-005 checker's local wiring                                                                                                                |
+| `tests/workflow_contracts/test_cuprum_pin.py`   | Contract tests holding the cuprum pin, the lock, and the installed version together                                                                                 |
 
-Test bodies call real functions. Where a module shells out, the double replaces
-the resolution point rather than the logic: `tests/support/podman.py` provides
-typed recording stand-ins for `podman` and `tar`, and
+Test bodies call real functions. Where a module starts a process, the double
+replaces the resolution point rather than the logic: `tests/support/podman.py`
+provides typed recording stand-ins for `podman` and `tar`, and
 `install_recording_tools(monkeypatch)` patches
 `polythene.isolation.get_command` and `polythene.isolation.run_cmd` so
 `export_rootfs` runs end to end with the real control flow and no container
-runtime. The recorded `CommandRecord` objects carry the argv, the `fg` choice,
-the timeout, and the other run options, so a test can assert ordering and exact
-arguments. Other tests run genuinely lightweight commands — `echo`, and a
-one-line Python snippet — through plumbum, which is what the `run_cmd` tests
-are about.
+runtime. The doubles return *real* cuprum results — a `CommandResult`, or a
+`PipelineResult` built from one result per stage — rather than a lookalike, so
+the code under test exercises the same accessors production uses. The recorded
+`CommandRecord` objects carry the argv, the `fg` choice, the timeout, and the
+other run options, so a test can assert ordering and exact arguments. Other
+tests run genuinely lightweight commands — `echo`, `sh`, and a one-line Python
+snippet — through cuprum, which is what the `run_cmd` tests are about.
+
+Anything that must cross a real process boundary goes through
+`tests/support/process.py`, which builds a one-program catalogue per call. That
+covers the CLI entry points, the release workflow's Bash steps, `make -n` in
+the workflow contracts, and the fresh-interpreter environment test. Keeping one
+helper for all of them means the suite has a single way to start a process
+rather than one per test module.
 
 Each Gherkin feature file lives in `tests/features/` and is bound by a module in
 `tests/bdd/` through `scenarios("../features/NAME.feature")`; the bindings are

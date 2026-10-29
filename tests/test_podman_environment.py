@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
-from plumbum import local
+
+from tests.support.process import run_child
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 ENVIRONMENT_IMPORT_SCRIPT = """
@@ -63,13 +63,15 @@ def test_import_preserves_podman_environment(
     expected_values: dict[str, str | None],
 ) -> None:
     """Importing isolation leaves caller Podman settings unchanged."""
-    with local.cwd(REPOSITORY_ROOT):
-        exit_code, stdout, stderr = local[sys.executable][
-            "-c", ENVIRONMENT_IMPORT_SCRIPT, json.dumps(caller_values)
-        ].run(retcode=None, timeout=10)
+    outcome = run_child(
+        ENVIRONMENT_IMPORT_SCRIPT,
+        json.dumps(caller_values),
+        cwd=REPOSITORY_ROOT,
+        timeout=10,
+    )
 
-    assert exit_code == 0, f"fresh interpreter failed: {stderr}"
-    assert json.loads(stdout) == {
+    assert outcome.exit_code == 0, f"fresh interpreter failed: {outcome.stderr}"
+    assert json.loads(outcome.stdout or "") == {
         "before": expected_values,
         "after": expected_values,
     }

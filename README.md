@@ -5,7 +5,7 @@ https://deepwiki.com/leynos/polythene)
 
 Polythene packages the Linux packaging helper originally shipped with the
 shared-actions repository. It bundles the Cyclopts-based command line
-interface, its plumbum process helpers, and uuid6 UUID generation so you can
+interface, its cuprum process helpers, and uuid6 UUID generation so you can
 pull container images and execute commands inside ephemeral root filesystems
 without requiring a full container runtime on the target machine.
 
@@ -31,7 +31,7 @@ the package metadata and installed automatically when you run the Makefile
 targets below:
 
 - [Cyclopts](https://pypi.org/project/cyclopts/) for the command line interface.
-- [plumbum](https://plumbum.readthedocs.io/) for running external commands such
+- [cuprum](https://pypi.org/project/cuprum/) for running external commands such
   as `podman`, `bwrap`, and `proot`.
 - [uuid6](https://pypi.org/project/uuid6/) for generating collision-resistant
   identifiers for exported filesystems.

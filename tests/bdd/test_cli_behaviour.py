@@ -7,12 +7,23 @@ import typing as typ
 from pathlib import Path
 
 import pytest
+from cuprum import (
+    Program,
+    ProgramCatalogue,
+    ProjectSettings,
+    SafeCmd,
+    SafeCmdBuilder,
+    sh,
+)
 from pytest_bdd import given, parsers, scenarios, then, when
 
 import polythene.backends as backend_module
 import polythene.isolation as isolation
 from tests.support.cli import CliResult
-from tests.support.podman import RecordingTools, install_recording_tools
+from tests.support.podman import RecordingTools, install_recording_tools, result
+
+if typ.TYPE_CHECKING:
+    from polythene.cmd_utils import CommandOutcome
 
 Context = dict[str, object]
 
@@ -36,15 +47,31 @@ def _podman_tools(cli_context: Context) -> RecordingTools:
 scenarios("../features/polythene_cli.feature")
 
 
-class _RecordingCommand:
-    """Capture proot invocations to assert shell arguments."""
+class _RecordingTool:
+    """A cuprum builder stand-in that records the argv proot would receive.
 
-    def __init__(self) -> None:
+    The builder is what ``get_command`` returns, so the stub is called with a
+    command's arguments and hands back a real command built from a throwaway
+    catalogue. Recording the arguments keeps the assertion about what the CLI
+    asked proot to do, which is the behaviour under test.
+    """
+
+    def __init__(self, binary: str) -> None:
+        self.binary = binary
         self.calls: list[tuple[str, ...]] = []
 
-    def __getitem__(self, args: tuple[str, ...]) -> tuple[str, ...]:
+    def __call__(self, *args: str) -> SafeCmd:
         self.calls.append(args)
-        return args
+        return sh.make(
+            Program(self.binary),
+            catalogue=ProgramCatalogue(
+                projects=(
+                    ProjectSettings(
+                        name="polythene-bdd", programs=(Program(self.binary),)
+                    ),
+                )
+            ),
+        )(*args)
 
 
 @pytest.fixture
@@ -108,16 +135,16 @@ def stub_proot(monkeypatch: pytest.MonkeyPatch, cli_context: Context) -> None:
         None,
     )
     assert proot_backend is not None, "proot backend not available for tests"
-    stub = _RecordingCommand()
+    stub = _RecordingTool(proot_backend.binary)
     executions: list[tuple[str, ...]] = []
 
-    def fake_get_command(binary: str) -> _RecordingCommand:
+    def fake_get_command(binary: str) -> SafeCmdBuilder:
         assert binary == proot_backend.binary
-        return stub
+        return typ.cast("SafeCmdBuilder", stub)
 
-    def fake_run_cmd(cmd: tuple[str, ...], *, fg: bool, timeout: int | None) -> int:
-        executions.append(cmd)
-        return 0
+    def fake_run_cmd(cmd: SafeCmd, **_: object) -> CommandOutcome:
+        executions.append(cmd.argv)
+        return result(cmd, 0)
 
     monkeypatch.setattr(isolation, "BACKENDS", (proot_backend,))
     monkeypatch.setattr(backend_module, "get_command", fake_get_command)
@@ -195,7 +222,7 @@ def assert_probe_without_pull(cli_context: Context, image: str) -> None:
 @then("proot ran without requesting a login shell")
 def assert_proot_non_login(cli_context: Context) -> None:
     """Verify that the stubbed proot invocation avoids ``-lc``."""
-    stub = typ.cast("_RecordingCommand", cli_context["proot_stub"])
+    stub = typ.cast("_RecordingTool", cli_context["proot_stub"])
     executions = typ.cast("list[tuple[str, ...]]", cli_context["proot_executions"])
     assert stub.calls == executions
     # Ensure no login shell was requested anywhere

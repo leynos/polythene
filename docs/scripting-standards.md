@@ -35,8 +35,11 @@ as a default.
   expectations travel with the file. Prefer the shebang
   `#!/usr/bin/env -S uv run python` followed by the metadata block shown in the
   example below.
-- External processes are invoked via [`plumbum`](https://plumbum.readthedocs.io)
-  to provide structured command execution rather than ad‑hoc shell strings.
+- External processes are invoked via
+  [`cuprum`](https://pypi.org/project/cuprum/) to provide curated, structured
+  command execution rather than ad‑hoc shell strings. Cuprum is pre-release, so
+  a script pins the exact beta it was written against; the repository's own pin
+  is the one the suite has run.
 - File‑system interactions use `pathlib.Path`. Higher‑level operations (for
   example, copying or removing trees) go through the `shutil` standard library
   module.
@@ -47,26 +50,53 @@ as a default.
 #!/usr/bin/env -S uv run python
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["plumbum", "cmd-mox"]
+# dependencies = ["cuprum==0.2.0b2"]
 # ///
 
 from __future__ import annotations
 
 from pathlib import Path
-from plumbum import local
-from plumbum.cmd import tofu
+
+from cuprum import (
+    ExecutionContext,
+    Program,
+    ProgramCatalogue,
+    RunOutputOptions,
+    StdioTarget,
+    sh,
+)
+
+#: Every executable this script may start. Cuprum refuses any other name when
+#: the command is built, so a typo fails before anything spawns.
+CATALOGUE = ProgramCatalogue.from_programs(Program("tofu"), name="infra")
+
+#: Foreground: the plan's output reaches the terminal as the tool wrote it.
+FOREGROUND = RunOutputOptions(
+    capture=False,
+    stdout=StdioTarget.inherit(),
+    stderr=StdioTarget.inherit(),
+)
 
 
 def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
     cluster_dir = project_root / "infra" / "clusters" / "dev"
-    with local.cwd(cluster_dir):
-        tofu["plan"]()
+    # The builder is not the command: call it, even with no arguments.
+    plan = sh.make(Program("tofu"), catalogue=CATALOGUE)("plan")
+    result = plan.run_sync(output=FOREGROUND, context=ExecutionContext(cwd=cluster_dir))
+    raise SystemExit(result.exit_code)
 
 
 if __name__ == "__main__":
     main()
 ```
+
+Two details are easy to get wrong. `sh.make` returns a builder, so the command
+is `sh.make(...)("plan")` and not `sh.make(...)`; a bare builder echoed into a
+log tells you nothing about what ran. And with `capture` and `echo` both off,
+cuprum gives the child a pipe nobody reads, so its output is *discarded* rather
+than passed through. A foreground command has to say `StdioTarget.inherit()`
+explicitly.
 
 ### Cyclopts CLI pattern (environment‑first)
 
@@ -77,18 +107,33 @@ Employ Cyclopts when a script requires parameters, particularly under CI with
 #!/usr/bin/env -S uv run python
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["cyclopts>=2.9", "plumbum", "cmd-mox"]
+# dependencies = ["cyclopts>=4.25,<6.0", "cuprum==0.2.0b2"]
 # ///
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Annotated
+from typing import Annotated, Optional
 
 import cyclopts
 from cyclopts import App, Parameter
-from plumbum import local
-from plumbum.cmd import tofu
+from cuprum import (
+    ExecutionContext,
+    Program,
+    ProgramCatalogue,
+    RunOutputOptions,
+    StdioTarget,
+    sh,
+)
+
+#: Every executable this script may start.
+CATALOGUE = ProgramCatalogue.from_programs(Program("tofu"), name="infra")
+
+FOREGROUND = RunOutputOptions(
+    capture=False,
+    stdout=StdioTarget.inherit(),
+    stderr=StdioTarget.inherit(),
+)
 
 # Map INPUT_<PARAM> → function parameter without additional glue
 app = App(config=cyclopts.config.Env("INPUT_", command=False))
@@ -132,8 +177,11 @@ def main(
         return
 
     build_dir.mkdir(parents=True, exist_ok=True)
-    with local.cwd(build_dir):
-        tofu["plan"]()  # replace with real build tooling
+    # Replace the planned target with the real build tooling.
+    plan = sh.make(Program("tofu"), catalogue=CATALOGUE)("plan")
+    result = plan.run_sync(output=FOREGROUND, context=ExecutionContext(cwd=build_dir))
+    if result.exit_code != 0:
+        raise SystemExit(result.exit_code)
 
 
 if __name__ == "__main__":
@@ -162,71 +210,203 @@ Guidance:
   config_out: Annotated[Optional[Path], Parameter(env_var="INPUT_CONFIG_PATH")] = None
   ```
 
-## plumbum: command calling and pipelines
+## cuprum: command calling and pipelines
 
-### Basics: command calls, capturing output, handling failures
+### Basics: curated programs, capturing output, handling failures
 
 ```python
-from __future__ annotations
-from plumbum import local
-from plumbum.cmd import git, grep
+from __future__ import annotations
 
-# Capture stdout (raises ProcessExecutionError on non‑zero exit)
-last_commit = git["--no-pager", "log", "-1", "--pretty=%H"]().strip()
+import sys
 
-# Obtain (rc, out, err) without raising
-rc, out, err = git["status"].run(retcode=None)
-if rc != 0:
-    # handle gracefully; err is available for logging
-    ...
+from cuprum import Program, ProgramCatalogue, RunOutputOptions, sh
 
-# Pipelines via the | operator
-shortlog = (git["--no-pager", "log", "--oneline"] | grep["fix"])()
+# Every program the examples below build must be here: cuprum refuses an
+# unlisted name when the command is constructed, before anything is spawned.
+CATALOGUE = ProgramCatalogue.from_programs(
+    Program("git"), Program("grep"), Program("sed"), Program("wc"),
+    Program("make"), Program("echo"), Program("sleep"),
+    name="repo",
+)
+
+
+def git(*args: str):
+    """Build one git command from this module's catalogue."""
+    return sh.make(Program("git"), catalogue=CATALOGUE)(*args)
+
+
+# Capture stdout. A non-zero exit does NOT raise: it is data on the result.
+result = git("--no-pager", "log", "-1", "--pretty=%H").run_sync(
+    output=RunOutputOptions(capture=True)
+)
+if result.exit_code != 0:
+    # Handle gracefully; result.stderr holds the tool's own diagnostic.
+    raise SystemExit(result.exit_code)
+last_commit = result.stdout.strip()
+
+# Pipelines join with |, and the result carries every stage.
+shortlog = (git("--no-pager", "log", "--oneline") | sh.make(
+    Program("grep"), catalogue=CATALOGUE
+)("fix")).run_sync(output=RunOutputOptions(capture=True))
+
+if not shortlog.ok:
+    # `failure` and `failure_index` name the stage that actually failed; the
+    # pipeline's `final` stage may only report that it was killed.
+    failed = shortlog.failure
+    print(f"stage {shortlog.failure_index}: {failed.stderr}", file=sys.stderr)
 ```
+
+`RunOutputOptions(capture=True)` is the default, so a bare `run_sync()`
+captures as well; naming it makes the read of `stdout`/`stderr` explicit.
+`run_sync` takes its options as keyword arguments only —
+`run_sync(RunOutputOptions(...))` is a `TypeError`.
 
 ### Working directory and environment management
 
+Cuprum has no ambient working-directory stack. The directory and the
+environment travel with the *execution*, so two commands run with different
+settings cannot interfere with one another:
+
 ```python
 from pathlib import Path
-from plumbum import local
+
+from cuprum import ExecutionContext, RunOutputOptions
+from cuprum.context import EnvMode
 
 repo_dir = Path(__file__).resolve().parents[1]
 
-with local.cwd(repo_dir):
-    tags = local["git"]["tag", "--list"]()
+tags = git("tag", "--list").run_sync(
+    output=RunOutputOptions(capture=True),
+    context=ExecutionContext(cwd=repo_dir),
+)
 
-# Temporary env overrides
-with local.env(GIT_AUTHOR_NAME="CI", GIT_AUTHOR_EMAIL="ci@example.org"):
-    local["git"]["config", "user.name", "CI"]()
+# An environment named on the context is an OVERLAY on the live process
+# environment by default: variables set after import stay visible.
+identity = git("var", "GIT_AUTHOR_IDENT").run_sync(
+    output=RunOutputOptions(capture=True),
+    context=ExecutionContext(
+        cwd=repo_dir,
+        env={"GIT_AUTHOR_NAME": "CI", "GIT_AUTHOR_EMAIL": "ci@example.org"},
+    ),
+)
+assert identity.stdout.startswith("CI <ci@example.org>")
+
+# REPLACE renders from an empty environment instead; use it to prove what the
+# child can see, or to keep a credential-bearing variable out of it.
+scrubbed = git("status").run_sync(
+    context=ExecutionContext(env={"PATH": "/usr/bin:/bin"}, env_mode=EnvMode.REPLACE)
+)
+```
+
+`cuprum.env(...)` is the ambient equivalent when a whole block of code, not one
+execution, must see a variable:
+
+```python
+from cuprum import env
+
+with env(GIT_AUTHOR_NAME="CI", GIT_AUTHOR_EMAIL="ci@example.org"):
+    git("var", "GIT_AUTHOR_IDENT").run_sync(output=RunOutputOptions(capture=True))
 ```
 
 ### Foreground execution and background jobs
 
 ```python
-from plumbum import FG, BG
-from plumbum.cmd import make
+import asyncio
 
-# Stream output to terminal
-make["-j4"] & FG
+from cuprum import RunOutputOptions, StdioTarget
 
-# Background process
-proc = local["sleep"]["5"] & BG
-proc.wait()
+# Foreground: name the inherited streams. capture=False alone would DISCARD
+# the child's output, because cuprum hands it a pipe nobody reads.
+FOREGROUND = RunOutputOptions(
+    capture=False,
+    stdout=StdioTarget.inherit(),
+    stderr=StdioTarget.inherit(),
+)
+
+make = sh.make(Program("make"), catalogue=CATALOGUE)("-j4")
+make.run_sync(output=FOREGROUND)
+
+
+async def background() -> None:
+    """Start a child, use the handle, and let the handle settle it."""
+    echo = sh.make(Program("echo"), catalogue=CATALOGUE)("done")
+    # start() is a coroutine returning a handle that owns the child; leaving
+    # the `async with` block stops a child that is still running.
+    handle = await echo.start()  # captures by default
+    async with handle as owned:
+        result = await owned.wait()
+    print(result.exit_code, result.stdout)
+
+    sleep = sh.make(Program("sleep"), catalogue=CATALOGUE)("5")
+    handle = await sleep.start()
+    result = await handle.terminate()  # SIGTERM, then the grace period
+    print(result.exit_code)  # signal-derived, so negative
+
+
+asyncio.run(background())
 ```
 
-### Piping stdin and redirecting
+`SafeCmd.start()` is a coroutine, so the handle must be awaited before
+`async with` can be used on it. Capture is **forced on** for a handle — the
+whole point of one is to be able to ask what the child said, and a child whose
+streams went to a pipe nothing reads cannot answer. An inherited target is
+therefore refused outright:
+
+```plaintext
+ValueError: RunOutputOptions stdout cannot be redirected to 'inherit' while
+capture or echo is enabled
+```
+
+To watch a long-running child while it works, echo instead of inheriting:
+`RunOutputOptions(capture=True, echo=True)` mirrors each line to the parent and
+still returns both streams. The handle offers `wait()`, `signal()`,
+`terminate()`, and `kill()`, all coroutines, and every one of them is
+idempotent.
+
+### Piping stdin and redirection
 
 ```python
-from plumbum import local
-from plumbum.cmd import sed, git, grep, wc
+from pathlib import Path
 
-# Provide stdin explicitly
-_, out, _ = sed["-n", "s/^v//p"].run(stdin="v1.2.3\nv2.0.0\n")
-assert out.splitlines() == ["1.2.3", "2.0.0"]
+from cuprum import RunOutputOptions, StdinInput, StdioTarget
 
-# Multi‑stage pipelines
-count = (git["--no-pager", "log", "--oneline"] | grep["chore"] | wc["-l"])().strip()
+# Provide stdin explicitly. A bare string is not accepted: the run-time type
+# check reaches `.resolve()` on it first and reports AttributeError, so wrap
+# the text in StdinInput.
+stripped = sh.make(Program("sed"), catalogue=CATALOGUE)(
+    "-n", "s/^v//p"
+).run_sync(
+    output=RunOutputOptions(capture=True),
+    stdin=StdinInput(text="v1.2.3\nv2.0.0\n"),
+)
+assert stripped.stdout.splitlines() == ["1.2.3", "2.0.0"]
+
+# Multi-stage pipeline: the last stage's stdout is `PipelineResult.stdout`.
+count = (git("--no-pager", "log", "--oneline") | sh.make(
+    Program("grep"), catalogue=CATALOGUE
+)("chore") | sh.make(
+    Program("wc"), catalogue=CATALOGUE
+)("-l")).run_sync(output=RunOutputOptions(capture=True))
+assert count.stdout.strip().isdigit()
+
+# Redirection is a StdioTarget on one command, never on a pipeline: cuprum
+# binds a pipeline's intermediate streams across stages.
+log = Path("dist/git.log")
+git("status").run_sync(
+    output=RunOutputOptions(
+        capture=False,
+        stdout=StdioTarget.path(log),
+        stderr=StdioTarget.inherit(),
+    )
+)
 ```
+
+A pipeline refuses `RunOutputOptions` stdio targets with
+`ValueError: Pipeline.run does not support RunOutputOptions stdout, stderr
+targets`.
+It also has no `stdin`, so a stage that reads input must be given it some
+other way — feed the data between two `run_sync` calls, or redirect a single
+command instead of a pipeline.
 
 ## pathlib: robust path manipulation
 
@@ -282,25 +462,43 @@ except FileNotFoundError:
     pass
 ```
 
-## Cyclopts + plumbum + pathlib together (reference script)
+## Cyclopts + cuprum + pathlib together (reference script)
 
 ```python
 #!/usr/bin/env -S uv run python
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["cyclopts>=2.9", "plumbum", "cmd-mox"]
+# dependencies = ["cyclopts>=4.25,<6.0", "cuprum==0.2.0b2"]
 # ///
 
 from __future__ import annotations
+
 from pathlib import Path
-from typing import Optional, Annotated
+from typing import Annotated, Optional
 
 import cyclopts
 from cyclopts import App, Parameter
-from plumbum import local, FG
-from plumbum.cmd import git
+from cuprum import (
+    ExecutionContext,
+    Program,
+    ProgramCatalogue,
+    RunOutputOptions,
+    StdioTarget,
+    sh,
+)
+
+#: Every executable this script may start.
+CATALOGUE = ProgramCatalogue.from_programs(Program("git"), name="release")
+
+#: Foreground: inherited streams, so the tag command's own output is shown.
+FOREGROUND = RunOutputOptions(
+    capture=False,
+    stdout=StdioTarget.inherit(),
+    stderr=StdioTarget.inherit(),
+)
 
 app = App(config=cyclopts.config.Env("INPUT_", command=False))
+
 
 @app.default
 def main(
@@ -316,8 +514,12 @@ def main(
     dist.mkdir(parents=True, exist_ok=True)
 
     if not dry_run:
-        with local.cwd(project_root):
-            (git["tag", f"v{version}"] & FG)
+        tag = sh.make(Program("git"), catalogue=CATALOGUE)("tag", f"v{version}")
+        result = tag.run_sync(
+            output=FOREGROUND, context=ExecutionContext(cwd=project_root)
+        )
+        if result.exit_code != 0:
+            raise SystemExit(result.exit_code)
 
     print({
         "bin_name": bin_name,
@@ -326,15 +528,17 @@ def main(
         "dist": str(dist),
     })
 
+
 if __name__ == "__main__":
     app()
 ```
 
 ## Testing expectations
 
-- Automated coverage via `pytest` is required for every script. Fixtures from
-  `pytest-mock` support Python‑level mocking; `cmd-mox` simulates external
-  executables without touching the host system.
+- Automated coverage via `pytest` is required for every script. `monkeypatch`
+  covers Python‑level substitution; external executables are replaced by
+  pointing `PATH` at a shim script, which cuprum resolves at spawn time just as
+  it would a real binary.
 - Behavioural flows that map cleanly to scenarios should adopt Behaviour‑Driven
   Development (BDD) via `pytest-bdd` so that intent is captured in
   human‑readable Given/When/Then narratives.
@@ -344,16 +548,14 @@ if __name__ == "__main__":
   modes must be asserted; tests should demonstrate graceful error handling
   rather than opaque stack traces.
 
-### Mocking Python dependencies (pytest-mock) and environment (monkeypatch)
+### Python dependencies and environment (monkeypatch)
 
 ```python
-import os
-from pathlib import Path
 from cyclopts.testing import invoke
 from scripts.package import app
 
 
-def test_reads_env_and_defaults(monkeypatch, tmp_path):
+def test_reads_env_and_defaults(monkeypatch):
     # Arrange env for Cyclopts
     monkeypatch.setenv("INPUT_BIN_NAME", "demo")
     monkeypatch.setenv("INPUT_VERSION", "1.2.3")
@@ -367,75 +569,72 @@ def test_reads_env_and_defaults(monkeypatch, tmp_path):
     assert '"version": "1.2.3"' in result.stdout
 
 
-def test_patch_python_dependency(mocker):
-    # Example: patch a helper function used by the script
+def test_patched_helper(monkeypatch):
+    # Substitute a helper rather than starting the process it would run.
     from scripts import helpers
 
-    mocker.patch_object(helpers, "compute_checksum", return_value="deadbeef")
+    monkeypatch.setattr(helpers, "compute_checksum", lambda _data: "deadbeef")
     assert helpers.compute_checksum(b"abc") == "deadbeef"
 ```
 
-### Mocking external executables with cmd-mox (record → replay → verify)
+### Replacing external executables with a PATH shim
 
-Enable the plugin in `conftest.py`:
-
-```python
-pytest_plugins = ("cmd_mox.pytest_plugin",)
-```
-
-```python
-from plumbum import local
-
-
-def test_git_tag_happy_path(cmd_mox, monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-
-    # Mock external command behaviour
-    cmd_mox.mock("git").with_args("tag", "v1.2.3").returns(exit_code=0)
-
-    # Run the code under test while shims are active
-    cmd_mox.replay()
-    local["git"]["tag", "v1.2.3"]()
-    cmd_mox.verify()
-
-
-def test_git_tag_failure_surface_error(cmd_mox, monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-
-    cmd_mox.mock("git").with_args("tag", "v1.2.3").returns(exit_code=1, stderr="denied")
-
-    cmd_mox.replay()
-    try:
-        local["git"]["tag", "v1.2.3"]()  # raises due to non‑zero rc
-        assert False, "expected ProcessExecutionError"
-    except Exception as exc:
-        assert "Command exited with code" in str(exc)
-    finally:
-        cmd_mox.verify()
-```
-
-### Spies and passthrough capture (turn real calls into fixtures)
+Cuprum resolves an executable when the command *runs*, not when it is built, so
+a shim earlier on `PATH` stands in for the real binary without patching the
+module under test. The shim records the arguments it was given, which is how a
+test asserts what would have run:
 
 ```python
-from plumbum import local
+import os
+import stat
+from pathlib import Path
+
+import pytest
+
+from scripts.package import tag_release
 
 
-def test_spy_and_record(cmd_mox, monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
+@pytest.fixture
+def git_shim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Put a recording ``git`` on PATH and return its transcript path."""
+    transcript = tmp_path / "git.log"
+    shim = tmp_path / "git"
+    shim.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> {transcript}\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    return transcript
 
-    # Spy records actual usage; passthrough runs the real command
-    spy = cmd_mox.spy("echo").passthrough()
 
-    cmd_mox.replay()
-    (local["echo"]["hello world"])()
-    cmd_mox.verify()
+def test_tag_release_passes_the_version(git_shim: Path) -> None:
+    tag_release("1.2.3")
 
-    # Inspect what happened
-    spy.assert_called()
-    assert spy.call_count == 1
-    args = spy.invocations[0].argv[1:]
-    assert args == ["hello world"]
+    assert git_shim.read_text(encoding="utf-8").split() == ["tag", "v1.2.3"]
+
+
+def test_tag_release_propagates_a_refusal(
+    git_shim: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Rewrite the shim so the command the script sees exits non-zero.
+    git_shim.with_name("git").write_text(
+        "#!/bin/sh\nprintf 'denied\\n' >&2\nexit 1\n", encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        tag_release("1.2.3")
+
+    assert excinfo.value.code == 1
 ```
+
+Because the child is a real process, the shim is the only thing standing in for
+it: the script's own `RunOutputOptions`, its `PATH` handling, and its exit-code
+translation are all exercised exactly as they are in production. A shim that
+merely replaces the module's `run_cmd`, by contrast, proves nothing about the
+part that was broken.
 
 ## Operational guidelines
 
@@ -486,10 +685,18 @@ def test_spy_and_record(cmd_mox, monkeypatch, tmp_path):
 
 - Newline‑separated lists are preferred for CI inputs to avoid shell quoting
   issues across platforms.
-- `Command.run(retcode=None)` permits inspection of non‑zero exits without
-  raising.
+- A non‑zero exit is data on the result, not an exception: inspect
+  `result.exit_code` and translate it once, at the point a caller needs a
+  process status.
 - Production code should present friendly error messages; tests may assert raw
-  behaviours (non‑zero exits, stderr contents) via `cmd-mox`.
+  behaviours (non‑zero exits, stderr contents) by reading the result, or by
+  giving a `PATH` shim a fixed exit status.
+- `cuprum.TimeoutExpired` derives from `TimeoutError`, so an existing
+  `except TimeoutError` keeps working; there is no second timeout exception to
+  catch.
+- A program missing from the catalogue fails when the command is *built* with
+  `UnknownProgramError`. A program that is curated but not installed fails when
+  the command *runs* with `FileNotFoundError`.
 - On Windows, newline‑separated lists are recommended for `list[Path]` to
   sidestep `;`/`:` semantics.
 

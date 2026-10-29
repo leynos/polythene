@@ -31,7 +31,8 @@ from tests.helpers.release_workflow import (
 
 if typ.TYPE_CHECKING:
     import pathlib as pth
-    import subprocess
+
+    from cuprum import CommandResult
 
 _TAG = "v1.2.3"
 #: The bundle is named after the tag, not the run, so a re-run meets the name
@@ -102,9 +103,7 @@ def _substitute(value: str, stated: dict[str, str]) -> str:
     )
 
 
-def _run_step(
-    job: str, name: str, cwd: pth.Path, env: dict[str, str]
-) -> subprocess.CompletedProcess[str]:
+def _run_step(job: str, name: str, cwd: pth.Path, env: dict[str, str]) -> CommandResult:
     """Run one step with its declared ``env`` resolved as GitHub Actions does.
 
     Resolving the declaration rather than restating it means the test exercises
@@ -122,7 +121,7 @@ def _run_step(
 def _step(job: str, name: str, cwd: pth.Path, env: dict[str, str]) -> None:
     """Run one step and require it to succeed."""
     completed = _run_step(job, name, cwd, env)
-    assert completed.returncode == 0, f"{job}/{name}: {completed.stderr}"
+    assert completed.exit_code == 0, f"{job}/{name}: {completed.stderr}"
 
 
 def _draft_and_publish_pypi(fake: FakeRelease) -> None:
@@ -281,8 +280,8 @@ def test_the_check_fails_when_the_destinations_disagree(fake: FakeRelease) -> No
         fake.env(GITHUB_REF_NAME=_TAG, GITHUB_OUTPUT=str(cwd / "output")),
     )
 
-    assert completed.returncode != 0, "a digest mismatch must fail the release"
-    assert f"{_BOTH} differs" in completed.stderr
+    assert completed.exit_code != 0, "a digest mismatch must fail the release"
+    assert f"{_BOTH} differs" in (completed.stderr or "")
     assert (fake.github / _BOTH).read_bytes() == b"clobbered by an earlier workflow"
 
 
@@ -299,8 +298,8 @@ def test_bytes_that_do_not_match_the_index_are_never_uploaded(
 
     completed = run_bash(step_script("publish-release", _PUBLISH_STEPS[4]), cwd, env)
 
-    assert completed.returncode != 0, "a download must match PyPI's digest"
-    assert _PYPI_ONLY in completed.stderr
+    assert completed.exit_code != 0, "a download must match PyPI's digest"
+    assert _PYPI_ONLY in (completed.stderr or "")
     assert _PYPI_ONLY not in _holdings(fake.github)
 
 
@@ -330,7 +329,7 @@ def test_the_re_fetch_polls_past_a_cached_index(fake: FakeRelease) -> None:
     before = len(fake.calls("curl"))
 
     refetch = _run_step("publish-release", "Re-fetch the PyPI index", cwd, env)
-    assert refetch.returncode == 0, refetch.stderr
+    assert refetch.exit_code == 0, refetch.stderr
     _step("publish-release", "Check both destinations hold the same bytes", cwd, env)
 
     listed = json.loads((cwd / "pypi-index.json").read_text(encoding="utf-8"))
@@ -340,7 +339,7 @@ def test_the_re_fetch_polls_past_a_cached_index(fake: FakeRelease) -> None:
     index_url = "https://pypi.org/simple/polythene-isolate/"
     indexes = [call for call in fake.calls("curl")[before:] if call[-1] == index_url]
     assert len(indexes) == 2, "a stale response, then the one that shows the upload"
-    assert "::error" not in refetch.stderr, (
+    assert "::error" not in (refetch.stderr or ""), (
         "a cache that is merely behind must not paint an error annotation"
     )
 
@@ -364,8 +363,8 @@ def test_the_re_fetch_stays_bounded_when_the_index_never_catches_up(
 
     completed = _run_step("publish-release", "Re-fetch the PyPI index", cwd, env)
 
-    assert completed.returncode != 0, "a permanently stale index must fail"
-    assert "still does not list" in completed.stderr
+    assert completed.exit_code != 0, "a permanently stale index must fail"
+    assert "still does not list" in (completed.stderr or "")
     assert len(fake.calls("curl")) - before <= 6, "the poll must stay bounded"
 
 

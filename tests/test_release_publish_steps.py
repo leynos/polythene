@@ -30,7 +30,8 @@ from tests.helpers.release_workflow import (
 
 if typ.TYPE_CHECKING:
     import pathlib as pth
-    import subprocess
+
+    from cuprum import CommandResult
 
 _COLLECT_STEP = ("attest", "Collect release artefacts")
 _INDEX_STEP = ("publish-pypi", "Fetch the PyPI index")
@@ -70,7 +71,7 @@ def test_a_matching_tag_passes_and_reports_its_prerelease_status(
     """The tag-derived version must equal the declared one, in either spelling."""
     completed, written = run_version_check(tmp_path, version, version)
 
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.exit_code == 0, (completed.stdout or "") + (completed.stderr or "")
     assert written == {"prerelease": expected_prerelease}, (
         f"{version} must be reported as prerelease={expected_prerelease}"
     )
@@ -87,9 +88,9 @@ def test_a_mismatched_tag_fails_before_anything_is_published(
     """A tag naming another version stops the release with an annotation."""
     completed, written = run_version_check(tmp_path, declared, tag_version)
 
-    assert completed.returncode != 0, "a mismatched tag must fail the release"
+    assert completed.exit_code != 0, "a mismatched tag must fail the release"
     assert "::error file=pyproject.toml,title=Tag/pyproject.toml mismatch::" in (
-        completed.stdout
+        completed.stdout or ""
     )
     assert written == {}, "a failed check must not report a prerelease status"
 
@@ -110,7 +111,7 @@ def test_collection_gathers_the_sdist_with_every_wheel(tmp_path: pth.Path) -> No
 
     completed = run_bash(step_script(*_COLLECT_STEP), tmp_path)
 
-    assert completed.returncode == 0, completed.stderr
+    assert completed.exit_code == 0, completed.stderr or ""
     collected = sorted(path.name for path in (tmp_path / "dist" / "publish").iterdir())
     assert collected == list(_ARTEFACTS), "every wheel and the sdist must be staged"
 
@@ -128,13 +129,13 @@ def test_collection_fails_without_exactly_one_sdist(
 
     completed = run_bash(step_script(*_COLLECT_STEP), tmp_path)
 
-    assert completed.returncode != 0, "the release needs exactly one sdist"
-    assert "Expected exactly one source distribution." in completed.stderr
+    assert completed.exit_code != 0, "the release needs exactly one sdist"
+    assert "Expected exactly one source distribution." in (completed.stderr or "")
 
 
 def _fetch_and_skip(
     tmp_path: pth.Path, statuses: str, published: tuple[str, ...] = ()
-) -> tuple[FakeRelease, subprocess.CompletedProcess[str], dict[str, str]]:
+) -> tuple[FakeRelease, CommandResult, dict[str, str]]:
     """Run the index fetch, then the skip step if the fetch succeeded."""
     fake = fake_release(tmp_path)
     link_scripts(tmp_path)
@@ -144,7 +145,7 @@ def _fetch_and_skip(
     (tmp_path / "github-state" / "assets.json").write_text('{"assets": []}', "utf-8")
     env = fake.env(FAKE_CURL_STATUSES=statuses)
     completed = run_bash(step_script(*_INDEX_STEP), tmp_path, env)
-    if completed.returncode == 0:
+    if completed.exit_code == 0:
         completed = run_bash(step_script(*_SKIP_STEP), tmp_path, env)
     return fake, completed, outputs(tmp_path / "github-output")
 
@@ -171,9 +172,9 @@ def test_artefacts_already_on_pypi_are_skipped_by_name(
     """Only unpublished names remain, and the step says whether any do."""
     _, completed, written = _fetch_and_skip(tmp_path, "200", published)
 
-    assert completed.returncode == 0, completed.stderr
+    assert completed.exit_code == 0, completed.stderr or ""
     assert _remaining(tmp_path) == remaining, "published names must be dropped"
-    assert "::notice::Skipping p-1.tar.gz: already on PyPI" in completed.stdout
+    assert "::notice::Skipping p-1.tar.gz: already on PyPI" in (completed.stdout or "")
     assert written == {"attempts": "1", "status": "200", "remaining": has_remaining}
 
 
@@ -183,7 +184,7 @@ def test_a_project_absent_from_pypi_reads_as_an_empty_index(
     """A 404 is a first release: nothing is skipped and every file uploads."""
     _, completed, written = _fetch_and_skip(tmp_path, "404")
 
-    assert completed.returncode == 0, completed.stderr
+    assert completed.exit_code == 0, completed.stderr or ""
     index = json.loads((tmp_path / "pypi-index.json").read_text(encoding="utf-8"))
     assert index == {"files": []}
     assert _remaining(tmp_path) == list(_ARTEFACTS)
@@ -194,7 +195,7 @@ def test_a_transient_failure_is_retried_and_counted(tmp_path: pth.Path) -> None:
     """A 503 then a 429 then a 200 succeeds on the third attempt."""
     fake, completed, written = _fetch_and_skip(tmp_path, "503,429,200")
 
-    assert completed.returncode == 0, completed.stderr
+    assert completed.exit_code == 0, completed.stderr or ""
     assert written["attempts"] == "3", "the retry count must be reported"
     assert written["status"] == "200"
     assert len(fake.calls("curl")) == 3
@@ -211,8 +212,8 @@ def test_a_failed_index_lookup_stops_the_upload(
     """A persistent 5xx or network error, or any other 4xx, fails the job."""
     fake, completed, written = _fetch_and_skip(tmp_path, statuses)
 
-    assert completed.returncode != 0, f"HTTP {statuses} must fail the lookup"
-    assert f"PyPI simple index returned HTTP {statuses}." in completed.stderr
+    assert completed.exit_code != 0, f"HTTP {statuses} must fail the lookup"
+    assert f"PyPI simple index returned HTTP {statuses}." in (completed.stderr or "")
     assert written == {"attempts": attempts, "status": statuses}
     assert len(fake.calls("curl")) == int(attempts), "the loop must stay bounded"
     assert _remaining(tmp_path) == list(_ARTEFACTS), "nothing may be skipped"

@@ -43,7 +43,7 @@ def _run_with_sdist_count(tmp_path: Path, count: int) -> tuple[int, str]:
         tmp_path,
         {"WHEEL_DIR": "dist"},
     )
-    return result.returncode, result.stderr
+    return result.exit_code, result.stderr or ""
 
 
 @pytest.mark.parametrize(
@@ -77,8 +77,8 @@ def test_the_wheel_count_is_also_exactly_one(tmp_path: Path) -> None:
         {"WHEEL_DIR": "dist"},
     )
 
-    assert completed.returncode != 0
-    assert "Expected exactly one pure Python wheel." in completed.stderr
+    assert completed.exit_code != 0
+    assert "Expected exactly one pure Python wheel." in (completed.stderr or "")
 
 
 def test_the_composite_action_builds_the_sdist_and_the_wheel() -> None:

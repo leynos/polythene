@@ -189,8 +189,7 @@ The CLI uses these exit statuses:
 | A child command ran                                       | The child's status              |
 
 `polythene.main(argv)` raises `SystemExit` and does not return a status code.
-`PolytheneSession.run` returns the subprocess status reported by its sandbox
-runner.
+`PolytheneSession.run` returns the exit status its sandbox runner reported.
 
 ## Environment variables
 

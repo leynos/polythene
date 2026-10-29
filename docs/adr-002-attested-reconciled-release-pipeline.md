@@ -227,14 +227,14 @@ reintroduced.
 
 `scripts/release_assets_cli.py` wraps the importable reconciliation library
 `scripts/release_assets.py`, and `scripts/release_version.py` compares the tag
-with the manifest. All three modules use only the Python standard library, not
-Cyclopts or Plumbum, and the entry points run under the runner's preinstalled
-`python3` rather than through `uv run`. This is a deliberate, documented
-exception to [scripting standards](scripting-standards.md): `publish-pypi`
-holds the PyPI OpenID Connect (OIDC) credential and must not resolve any
-third-party package while that credential is live. Every network call these
-scripts might otherwise make stays in the workflow's own `curl` and `gh` steps,
-which the scripts only plan for.
+with the manifest. All three modules use only the Python standard library — no
+Cyclopts, and no cuprum — and the entry points run under the runner's
+preinstalled `python3` rather than through `uv run`. This is a deliberate,
+documented exception to [scripting standards](scripting-standards.md):
+`publish-pypi` holds the PyPI OpenID Connect (OIDC) credential and must not
+resolve any third-party package while that credential is live. Every network
+call these scripts might otherwise make stays in the workflow's own `curl` and
+`gh` steps, which the scripts only plan for.
 
 ### Workflow hardening
 
@@ -267,7 +267,7 @@ rule would refuse the action once `ci.yml` began calling it.
   console script remain `polythene`; the name change is confined to packaging
   metadata and the release workflow.
 - The release library and its entry points diverge from the repository's
-  Cyclopts-and-Plumbum scripting baseline, confined to modules that run only
+  Cyclopts-and-cuprum scripting baseline, confined to modules that run only
   inside `release.yml`, immediately before or alongside the PyPI credential's
   use.
 - Publication has no telemetry beyond GitHub's run history and the attestation

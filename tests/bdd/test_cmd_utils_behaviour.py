@@ -3,33 +3,46 @@
 from __future__ import annotations
 
 import shlex
+import sys
 import typing as typ
 
 import pytest
 from _pytest.capture import CaptureResult
-from plumbum import local
+from cuprum import Program, ProgramCatalogue, ProjectSettings, SafeCmd, sh
 from pytest_bdd import parsers, scenarios, then, when
 
-from polythene.cmd_utils import run_cmd
+from polythene.cmd_utils import fail_on_error, run_cmd
 
 if typ.TYPE_CHECKING:
     import polythene.cmd_utils as cmd_utils_module
-else:  # pragma: no cover - runtime shim for annotations
-    cmd_utils_module = typ.cast("object", None)
 
 Context = dict[str, object]
 
 scenarios("../features/command_execution.feature")
 
+#: The scenario steps name programs the way a shell user would. ``python`` is
+#: registered under the running interpreter's absolute path so the feature runs
+#: that interpreter rather than whichever one ``PATH`` happens to offer.
+CATALOGUE = ProgramCatalogue(
+    projects=(
+        ProjectSettings(
+            name="polythene-behaviour",
+            programs=(
+                Program("echo"),
+                Program("false"),
+                Program(sys.executable),
+            ),
+        ),
+    )
+)
+_ALIASES = {"python": sys.executable}
 
-def _build_command(command: str) -> cmd_utils_module.Command:
-    """Construct a plumbum command from ``command`` or raise ``ValueError``."""
+
+def _build_command(command: str) -> SafeCmd:
+    """Build a curated command from a shell-style ``command`` string."""
     parts = shlex.split(command)
-    if not parts:
-        msg = "Command must contain at least one token"
-        raise ValueError(msg)
-    base = local[parts[0]]
-    return base if len(parts) == 1 else base[tuple(parts[1:])]
+    name = _ALIASES.get(parts[0], parts[0])
+    return sh.make(Program(name), catalogue=CATALOGUE)(*parts[1:])
 
 
 @pytest.fixture
@@ -44,31 +57,12 @@ def run_command(
     capsys: pytest.CaptureFixture[str],
     context: Context,
 ) -> None:
-    """Execute a shell command by constructing a plumbum invocation."""
-    try:
-        cmd = _build_command(command)
-    except ValueError as exc:
-        context["error"] = exc
-        return
+    """Execute a curated command in the foreground and record its outcome."""
     capsys.readouterr()
-    try:
-        result = run_cmd(cmd, fg=True)
-    except (TypeError, TimeoutError) as exc:
-        context["error"] = exc
-        return
-    captured = capsys.readouterr()
-    context["result"] = result
-    context["captured"] = captured
+    outcome = run_cmd(_build_command(command), fg=True)
+    context["result"] = fail_on_error(outcome)
+    context["captured"] = capsys.readouterr()
     context.pop("error", None)
-
-
-@when("I execute run_cmd with no command in foreground")
-def run_empty_command(
-    capsys: pytest.CaptureFixture[str],
-    context: Context,
-) -> None:
-    """Execute the shared command step with an empty command string."""
-    run_command("", capsys, context)
 
 
 @when(parsers.parse('I execute run_cmd with adapter "{snippet}"'))
@@ -77,20 +71,18 @@ def run_adapter(
     capsys: pytest.CaptureFixture[str],
     context: Context,
 ) -> None:
-    """Execute a Python snippet via a plumbum adapter."""
-    cmd = local["python"]["-c", snippet]
+    """Execute a Python snippet through the curated interpreter."""
     capsys.readouterr()
-    result = run_cmd(cmd, fg=True)
-    captured = capsys.readouterr()
-    context["result"] = result
-    context["captured"] = captured
-    context["snippet"] = snippet
+    python = sh.make(Program(sys.executable), catalogue=CATALOGUE)
+    outcome = run_cmd(python("-c", snippet), fg=True)
+    context["result"] = fail_on_error(outcome)
+    context["captured"] = capsys.readouterr()
     context.pop("error", None)
 
 
 @when("I execute run_cmd with an invalid command object")
 def run_invalid_command(context: Context) -> None:
-    """Attempt to execute run_cmd with an invalid command value."""
+    """Attempt to execute run_cmd with a value that is not a cuprum command."""
     invalid = typ.cast("cmd_utils_module.Command", object())
     with pytest.raises(TypeError) as exc_info:
         run_cmd(invalid)
@@ -103,13 +95,24 @@ def assert_success(context: Context) -> None:
     assert context.get("result") == 0
 
 
+@then(parsers.parse("run_cmd returns {status:d}"))
+def assert_status(context: Context, status: int) -> None:
+    """Ensure ``run_cmd`` reports ``status``."""
+    assert context.get("result") == status
+
+
+@then("no exception is recorded")
+def assert_no_error(context: Context) -> None:
+    """Check the failing child was reported as data, not raised."""
+    assert "error" not in context
+
+
 @then(parsers.parse('the stderr log includes "{text}"'))
 def assert_stderr_contains(context: Context, text: str) -> None:
     """Check that the captured stderr output includes ``text``."""
     captured = context.get("captured")
     assert isinstance(captured, CaptureResult)
-    stderr = str(captured.err)
-    assert text in stderr
+    assert text in str(captured.err)
 
 
 @then(parsers.parse('run_cmd raises a {exc_type} containing "{text}"'))

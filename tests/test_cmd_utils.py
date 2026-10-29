@@ -2,107 +2,149 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
+import inspect
 import os
-import subprocess
+import re
 import sys
+import time
 import typing as typ
+
+import pytest
+from cuprum import (
+    CommandResult,
+    PipelineResult,
+    Program,
+    ProgramCatalogue,
+    ProjectSettings,
+    SafeCmd,
+    SafeCmdBuilder,
+    TimeoutExpired,
+)
+
+from polythene import cmd_utils
+from polythene.cmd_utils import (
+    POLYTHENE_CATALOGUE,
+    command_result,
+    fail_on_error,
+    failure_detail,
+    program,
+    run_cmd,
+)
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
-import pytest
-from plumbum import local
-from plumbum.commands.processes import (
-    ProcessTimedOut,
+PYTHON = Program(sys.executable)
+
+#: A throwaway catalogue for probes. ``PYTHON`` is registered by its absolute
+#: path, so these tests run the interpreter they are already running under
+#: rather than whatever ``python`` happens to mean on ``PATH``.
+PROBE_CATALOGUE = ProgramCatalogue(
+    projects=(
+        ProjectSettings(
+            name="polythene-tests",
+            programs=(PYTHON, Program("sh"), Program("cat"), Program("false")),
+        ),
+    )
 )
 
-from polythene.cmd_utils import TimeoutConflictError, _merge_timeout, run_cmd
+
+def probe(name: str, *args: str) -> SafeCmd:
+    """Build a command from :data:`PROBE_CATALOGUE`."""
+    return _builder(name)(*args)
 
 
-def _stream_payload() -> str:
-    """Return a snippet writing distinct markers to stdout and stderr."""
-    return (
-        "import sys;"
-        " sys.stdout.write('child-stdout-marker\\n');"
-        " sys.stderr.write('child-stderr-marker\\n')"
-    )
+def _builder(name: str) -> SafeCmdBuilder:
+    """Return a builder for ``name`` from the probe catalogue."""
+    return program(name, catalogue=PROBE_CATALOGUE)
 
 
-def test_run_cmd_command_logs_and_succeeds(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """A plumbum command runs in the foreground and logs the invocation."""
-    cmd = local["echo"]["hi"]
+def _payload(source: str) -> SafeCmd:
+    """Build a command running ``source`` under this interpreter."""
+    return probe(str(PYTHON), "-c", source)
+
+
+_STREAM_PAYLOAD = (
+    "import sys;"
+    " sys.stdout.write('child-stdout-marker\\n');"
+    " sys.stderr.write('child-stderr-marker\\n')"
+)
+
+
+def test_run_cmd_echoes_the_invocation(capsys: pytest.CaptureFixture[str]) -> None:
+    """The echo line names the program and every argument, on stderr."""
     capsys.readouterr()
-    result = run_cmd(cmd, fg=True)
-    captured = capsys.readouterr()
-    assert result == 0
-    assert "echo hi" in captured.err
+
+    outcome = command_result(run_cmd(_payload("print('unit')"), fg=True))
+
+    assert outcome.exit_code == 0
+    echoed = capsys.readouterr().err
+    assert f"$ {sys.executable} -c 'print" in echoed
+    assert outcome.stdout is None, "a foreground run does not capture output"
 
 
-def test_run_cmd_adapter_handles_output(capsys: pytest.CaptureFixture[str]) -> None:
-    """Adapters run successfully and log their invocation."""
-    cmd = local["python"]["-c", "print('unit')"]
-    capsys.readouterr()
-    result = run_cmd(cmd, fg=True)
-    captured = capsys.readouterr()
-    assert result == 0
-    assert "python -c" in captured.err
+def test_run_cmd_captures_both_streams_by_default() -> None:
+    """A captured run returns the child's output instead of writing it."""
+    outcome = command_result(run_cmd(_payload(_STREAM_PAYLOAD)))
+
+    assert outcome.exit_code == 0
+    assert outcome.ok
+    assert outcome.stdout == "child-stdout-marker\n"
+    assert outcome.stderr == "child-stderr-marker\n"
 
 
-def test_run_cmd_foreground_inherits_stdout_without_overrides(
+def test_run_cmd_foreground_inherits_streams_without_overrides(
     capfd: pytest.CaptureFixture[str],
 ) -> None:
-    """A foreground call without stream overrides still inherits stdout."""
-    cmd = local[sys.executable]["-c", _stream_payload()]
+    """A foreground call without overrides hands the child the caller's streams.
 
-    assert run_cmd(cmd, fg=True) == 0
+    ``capfd`` is required because the child writes to the inherited file
+    descriptors; ``capsys`` would only see Python-level writes.
+    """
+    outcome = command_result(run_cmd(_payload(_STREAM_PAYLOAD), fg=True))
 
+    assert outcome.exit_code == 0
     captured = capfd.readouterr()
     assert "child-stdout-marker" in captured.out
-    assert "child-stderr-marker" in captured.err
+    # The echo line also reaches stderr, so match the child's exact line.
+    assert "child-stderr-marker" in captured.err.splitlines()
 
 
 @pytest.mark.parametrize("timeout", [None, 30])
-def test_run_cmd_foreground_honours_stdout_sink(
+def test_run_cmd_foreground_sends_stdout_to_a_path(
     timeout: int | None,
+    tmp_path: Path,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
-    """An explicit stdout sink silences the child with or without a timeout.
+    """A path override diverts stdout while stderr still inherits."""
+    sink = tmp_path / "sunk.txt"
 
-    The sink is checked with ``capfd`` because it must reach the child's real
-    file descriptor; ``capsys`` would only see Python-level writes.
-    """
-    cmd = local[sys.executable]["-c", _stream_payload()]
+    outcome = command_result(
+        run_cmd(_payload(_STREAM_PAYLOAD), fg=True, timeout=timeout, stdout=sink)
+    )
 
-    assert run_cmd(cmd, fg=True, timeout=timeout, stdout=subprocess.DEVNULL) == 0
-
+    assert outcome.exit_code == 0
+    assert sink.read_text(encoding="utf-8") == "child-stdout-marker\n"
     captured = capfd.readouterr()
     assert "child-stdout-marker" not in captured.out
-    # The echo of the invocation also reaches stderr, so assert the exact line
-    # the child wrote rather than a substring match.
     assert "child-stderr-marker" in captured.err.splitlines()
 
 
 def test_run_cmd_foreground_overrides_inherit_stdin(tmp_path: Path) -> None:
     """A stdout override must not cost the child its inherited stdin.
 
-    ``FG`` hard-codes inherited streams, so it preserves stdin; but a caller
-    that redirects only stdout takes the ``run`` path instead, where plumbum
-    defaults an unspecified ``stdin`` to ``PIPE``. ``run_proc`` then drains that
-    pipe with no input, handing the child an immediate EOF.
-
-    Pointing file descriptor 0 at a real file is what makes that difference
-    observable: an inherited descriptor yields the file's contents, whereas a
-    drained pipe yields nothing. The descriptor is swapped for the duration and
-    restored in ``finally`` so pytest's own capture is left intact.
+    Redirecting one stream cannot quietly turn the others into empty pipes:
+    a child that reads stdin has to see the parent's descriptor. Poking file
+    descriptor 0 at a real file is what makes that observable, because an
+    inherited descriptor yields the file's contents and a drained pipe yields
+    nothing. The descriptor is restored in ``finally`` so pytest's own capture
+    is left intact.
     """
     seen = tmp_path / "stdin.txt"
     payload = (
         f"import pathlib,sys;pathlib.Path({str(seen)!r}).write_text(sys.stdin.read())"
     )
-    cmd = local[sys.executable]["-c", payload]
-
     saved_stdin = os.dup(0)
     try:
         with (tmp_path / "parent-stdin.txt").open("w+") as feed:
@@ -110,88 +152,347 @@ def test_run_cmd_foreground_overrides_inherit_stdin(tmp_path: Path) -> None:
             feed.flush()
             feed.seek(0)
             os.dup2(feed.fileno(), 0)
-            assert run_cmd(cmd, fg=True, timeout=30, stdout=subprocess.DEVNULL) == 0
+            outcome = command_result(
+                run_cmd(_payload(payload), fg=True, timeout=30, stdout=os.devnull)
+            )
     finally:
         os.dup2(saved_stdin, 0)
         os.close(saved_stdin)
 
-    assert seen.read_text() == "inherited-stdin\n"
+    assert outcome.exit_code == 0
+    assert seen.read_text(encoding="utf-8") == "inherited-stdin\n"
 
 
-def test_run_cmd_rejects_string_commands() -> None:
-    """Passing a bare string raises an informative :class:`TypeError`."""
-    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
+def test_run_cmd_returns_a_failed_status_as_data() -> None:
+    """A non-zero exit is a result, not an exception."""
+    outcome = command_result(run_cmd(probe("sh", "-c", "exit 3")))
+
+    assert not outcome.ok
+    assert outcome.exit_code == 3
+    assert fail_on_error(outcome) == 3
+
+
+def test_run_cmd_reports_the_child_diagnostic_on_failure() -> None:
+    """The tool's own message reaches :func:`failure_detail`."""
+    outcome = run_cmd(probe("sh", "-c", "echo broken >&2; exit 4"))
+
+    assert failure_detail(outcome) == "exit status 4: broken"
+
+
+def test_run_cmd_rejects_a_bare_string() -> None:
+    """A string is not a command; the message names the correct form."""
+    with pytest.raises(TypeError, match="cuprum SafeCmd or Pipeline"):
         run_cmd(typ.cast("typ.Any", "echo oops"))
 
-    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
-        run_cmd(typ.cast("typ.Any", b"echo oops"))
-
-    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
-        run_cmd(typ.cast("typ.Any", bytearray(b"echo oops")))
-
-    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
-        run_cmd(typ.cast("typ.Any", 12345))
-
-    with pytest.raises(TypeError, match="must satisfy SupportsFormulate"):
+    with pytest.raises(TypeError, match="cuprum SafeCmd or Pipeline"):
         run_cmd(typ.cast("typ.Any", None))
 
 
-def test_run_cmd_timeout_conflict() -> None:
-    """Providing timeout via both argument and kwargs raises an error."""
-    with pytest.raises(TimeoutConflictError):
-        _merge_timeout(1, {"timeout": 2})
+class _Recording:
+    """Capture the options ``run_cmd`` passes down to cuprum."""
+
+    @staticmethod
+    def replace_run_sync(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> list[dict[str, object]]:
+        """Stub ``SafeCmd.run_sync`` and return the recorded keyword arguments."""
+        calls: list[dict[str, object]] = []
+
+        def fake_run_sync(
+            _cmd: SafeCmd,
+            **kwargs: object,
+        ) -> CommandResult:
+            calls.append(kwargs)
+            return CommandResult(
+                program=PYTHON,
+                argv=(),
+                exit_code=0,
+                pid=0,
+                stdout="",
+                stderr="",
+            )
+
+        monkeypatch.setattr(SafeCmd, "run_sync", fake_run_sync)
+        return calls
 
 
-def test_run_cmd_timeout_passthrough() -> None:
-    """Timeout merges into keyword arguments for adapters."""
-    calls: dict[str, object] = {}
+def test_run_cmd_returns_the_kwargs_to_the_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``timeout`` and ``context`` are forwarded, not swallowed."""
+    from cuprum import ExecutionContext
 
-    class _Stub:
-        def formulate(self) -> list[str]:
-            return ["stub"]
+    calls = _Recording.replace_run_sync(monkeypatch)
+    context = ExecutionContext(cwd="/")
 
-        def run(self, **kwargs: object) -> object:
-            calls.update(kwargs)
-            return 0
+    run_cmd(_payload(""), timeout=5, context=context)
 
-        def __call__(self, *args: object, **kwargs: object) -> object:
-            return 0
-
-    stub = _Stub()
-    assert run_cmd(stub, timeout=5) == 0
-    assert calls["timeout"] == 5
+    assert calls[0]["timeout"] == 5
+    assert calls[0]["context"] is context
 
 
-def test_run_cmd_timeout_with_unsupported_command() -> None:
-    """Providing a timeout to a command without ``run`` raises ``TypeError``."""
-
-    class _NoTimeout:
-        def formulate(self) -> list[str]:
-            return ["noop"]
-
-        def __call__(self, *args: object, **kwargs: object) -> int:
-            return 0
-
-    no_timeout = _NoTimeout()
-
-    with pytest.raises(TypeError, match="timeout execution"):
-        run_cmd(no_timeout, fg=True, timeout=1)
+def test_run_cmd_timeout_raises_timeout_error() -> None:
+    """A command that outlives its timeout raises :class:`TimeoutError`."""
+    with pytest.raises(TimeoutExpired):
+        run_cmd(_payload("import time; time.sleep(30)"), fg=True, timeout=0.2)
 
 
-def test_run_cmd_timeout_raises_timeout_error_on_expiry() -> None:
-    """Commands that time out propagate :class:`TimeoutError`."""
+def test_run_cmd_captured_overrides_are_refused() -> None:
+    """A captured run cannot redirect a stream it is meant to return."""
+    with pytest.raises(ValueError, match="require fg=True"):
+        run_cmd(_payload(""), stdout=os.devnull)
 
-    class _AlwaysTimeout:
-        def formulate(self) -> list[str]:
-            return ["timeout"]
 
-        def run(self, **kwargs: object) -> object:
-            raise ProcessTimedOut("timeout", 0.0)
+def test_run_cmd_rejects_an_unusable_override() -> None:
+    """The override message names cuprum's two spellings for redirection."""
+    with pytest.raises(TypeError, match=r"StdioTarget\.path"):
+        run_cmd(_payload(""), fg=True, stdout=typ.cast("typ.Any", 7))
 
-        def __call__(self, *args: object, **kwargs: object) -> int:
-            return 0
 
-    cmd = _AlwaysTimeout()
+def test_run_cmd_pipeline_captures_the_final_stage() -> None:
+    """A captured pipeline returns the last stage's output as ``.stdout``."""
+    outcome = run_cmd(
+        probe(str(PYTHON), "-c", "print('piped')") | probe("cat"),
+    )
 
-    with pytest.raises(TimeoutError):
-        run_cmd(cmd, fg=True, timeout=1)
+    assert isinstance(outcome, PipelineResult)
+    assert outcome.ok
+    assert outcome.stdout == "piped\n"
+    assert outcome.stages[0].stdout is None, "stage 0 pipes into stage 1"
+
+
+def test_run_cmd_pipeline_echoes_every_stage(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The echo line renders each stage and the ``|`` between them."""
+    capsys.readouterr()
+
+    run_cmd(probe(str(PYTHON), "-c", "pass") | probe("cat") | probe("cat"))
+
+    echoed = capsys.readouterr().err
+    assert echoed.count(" | ") == 2, echoed
+    assert echoed.count("cat") == 2, echoed
+
+
+def test_run_cmd_pipeline_refuses_a_stream_target() -> None:
+    """A pipeline's streams are bound across stages, so a target is refused."""
+    pipeline = probe("cat") | probe("cat")
+
+    with pytest.raises(ValueError, match="a pipeline cannot redirect"):
+        run_cmd(pipeline, fg=True, stdout=os.devnull)
+
+
+def test_fail_on_error_reports_the_failing_pipeline_stage() -> None:
+    """The failing stage's status is the one a caller can act on.
+
+    Cuprum kills the final stage once its input dies, so that stage reports a
+    signal-derived status. Returning it would tell the shell nothing about
+    what actually went wrong.
+    """
+    outcome = run_cmd(
+        probe("sh", "-c", "printf x; exit 2") | probe("cat"),
+    )
+
+    assert not outcome.ok
+    assert fail_on_error(outcome) == 2
+    assert failure_detail(outcome) == "stage 0 (exit status 2)"
+
+
+def test_command_result_rejects_a_pipeline_result() -> None:
+    """Narrowing the wrong result type names the mismatch."""
+    outcome = run_cmd(probe("cat") | probe("cat"))
+
+    with pytest.raises(TypeError, match="expected a single command result"):
+        command_result(outcome)
+
+
+#: Seconds the producer in the live-producer test spends writing. Cuprum's
+#: pure-Python pump gives an upstream stage only ``_POST_CLOSE_DRAIN_TIMEOUT_S``
+#: (0.25 s in cuprum 0.2.0b2) to reach EOF once the downstream stage closes,
+#: and then stops relaying without killing the producer. A producer that
+#: outlives that window is left blocked on a pipe, so the pipeline never
+#: settles. This budget stays inside the window while still outlasting the
+#: consumer's interpreter startup, which is what puts the two in flight
+#: together.
+_PRODUCER_BUDGET_S = 0.20
+
+
+def test_pipeline_names_the_consumer_that_died_under_a_live_producer() -> None:
+    """The failing stage is the consumer, even when the producer outlives it.
+
+    This is the shape ``export_rootfs`` has: a producer still writing when the
+    consumer gives up on its input, which is what cuprum's own stage bookkeeping
+    has to attribute correctly. The recording double used by the export tests
+    scripts ``failure_index``; only a real pipeline can show that cuprum
+    reports the same thing, so a drift in that attribution fails here rather
+    than silently making the export report the wrong command.
+
+    The producer stops on a wall-clock budget rather than a loop count. A count
+    tuned for this machine would drift past cuprum's drain window on a slower
+    one, turning the test into a hang instead of a failure; the budget below
+    bounds the workload itself. The consumer's own startup is measured
+    separately in ``test_live_producer_test_overlaps_its_consumer``.
+    """
+    # The producer writes until its budget runs out, which is well after the
+    # consumer has rejected its input, so the consumer is the stage that fails
+    # while input is still arriving.
+    producer = _payload(
+        "import sys, time\n"
+        f"end = time.monotonic() + {_PRODUCER_BUDGET_S}\n"
+        "while time.monotonic() < end:\n"
+        "    sys.stdout.write('garbage' * 4000)\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.002)\n",
+    )
+    consumer = _payload("import sys; sys.exit(3)")
+
+    outcome = run_cmd(producer | consumer, timeout=30)
+
+    assert isinstance(outcome, PipelineResult)
+    assert outcome.failure_index == 1
+    assert outcome.stages[0].ok
+    assert fail_on_error(outcome) == 3
+    assert failure_detail(outcome) == "stage 1 (exit status 3)"
+
+
+def test_live_producer_test_overlaps_its_consumer() -> None:
+    """The producer budget must outlast the consumer's startup.
+
+    The test above only proves what it claims while both stages are in flight:
+    a producer that finished before the consumer even started would leave the
+    consumer reading end-of-file, which is a different shape. Measuring the
+    consumer's startup here keeps that assumption honest, and fails loudly if a
+    slower interpreter or a heavier startup path erodes the margin.
+    """
+    started = time.monotonic()
+    outcome = command_result(run_cmd(_payload("import sys; sys.exit(3)"), timeout=30))
+    startup = time.monotonic() - started
+
+    assert outcome.exit_code == 3
+    assert startup < _PRODUCER_BUDGET_S, (
+        f"consumer startup {startup:.3f}s no longer fits inside the "
+        f"{_PRODUCER_BUDGET_S}s producer budget, so the two stages may not "
+        "overlap; raise the budget within cuprum's drain window or shorten "
+        "the consumer"
+    )
+
+
+def test_pipeline_settles_on_the_pure_python_stream_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pipeline must build the same answer whatever stream backend runs it.
+
+    cuprum dispatches its stream pump to a Rust extension when one is
+    installed and to a pure-Python fallback otherwise. Only the fallback
+    enforces the bounded post-close drain, and a producer that outlives it is
+    left blocked on a pipe, so a pipeline that settles under Rust can hang
+    under Python. The test above runs whichever backend this host resolved;
+    this one pins the fallback so a change that only works on the fast path
+    fails here instead of on a machine without the extension.
+    """
+    from cuprum import _backend, rust
+
+    if not rust.is_rust_available():
+        # Pinning the fallback is what this test adds, so on a host that
+        # already runs it there is nothing left to distinguish.
+        return
+
+    monkeypatch.setattr(_backend, "_RUST_AVAILABILITY_FOR_TESTING", False)
+    monkeypatch.setattr(_backend, "_check_rust_available", lambda: False)
+    monkeypatch.setattr(
+        _backend, "get_stream_backend", lambda: _backend.StreamBackend.PYTHON
+    )
+
+    producer = _payload(
+        "import sys, time\n"
+        f"end = time.monotonic() + {_PRODUCER_BUDGET_S}\n"
+        "while time.monotonic() < end:\n"
+        "    sys.stdout.write('garbage' * 4000)\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.002)\n",
+    )
+    consumer = _payload("import sys; sys.exit(3)")
+
+    outcome = run_cmd(producer | consumer, timeout=30)
+
+    assert isinstance(outcome, PipelineResult)
+    assert outcome.failure_index == 1
+    assert fail_on_error(outcome) == 3
+
+
+def test_failure_detail_reports_one_for_an_outcome_that_succeeded() -> None:
+    """A successful outcome reads as status 1, matching ``_normalize_retcode``.
+
+    ``failure_detail`` documents a successful outcome as an ``exit status``
+    with no detail, and the value it renders is the normalized one. A caller
+    that prints the detail to excuse a failure needs it to describe what
+    ``fail_on_error`` would return, not the raw zero.
+    """
+    outcome = command_result(run_cmd(_payload("")))
+
+    assert outcome.ok
+    assert fail_on_error(outcome) == 0
+    assert failure_detail(outcome) == "exit status 1"
+
+
+def test_failure_detail_reports_one_for_a_pipeline_that_succeeded() -> None:
+    """A pipeline with no failing stage renders the same normalized status."""
+    outcome = run_cmd(_payload("") | probe("cat"))
+
+    assert isinstance(outcome, PipelineResult)
+    assert outcome.ok
+    assert failure_detail(outcome) == "exit status 1"
+
+
+def test_documented_examples_name_only_catalogued_programs() -> None:
+    """Every ``program(...)`` in the public docstrings must build.
+
+    A ``doctest: +SKIP`` example still teaches a caller a call they may copy,
+    so an uncatalogued name there fails at their prompt rather than here.
+    """
+    documented = _documented_program_names()
+
+    assert documented, "no program(...) calls found in the module docstrings"
+    for name in documented:
+        program(name)  # raises UnknownProgramError for an uncurated name
+
+
+def _documented_program_names() -> set[str]:
+    """Return the program names the public docstrings' examples pass to ``program``."""
+    pattern = re.compile(r"""program\(\s*["']([^"']+)["']""")
+
+    names: set[str] = set()
+    for docstring in _public_docstrings():
+        names.update(pattern.findall(docstring))
+    return names
+
+
+def _public_docstrings() -> typ.Iterator[str]:
+    """Yield the docstring of every public function ``cmd_utils`` exports."""
+    for name in cmd_utils.__all__:
+        member = getattr(cmd_utils, name)
+        if inspect.isfunction(member) and member.__doc__:
+            yield member.__doc__
+
+
+def test_polythene_catalogue_covers_every_program_the_package_starts() -> None:
+    """The curated allowlist is the one place a program name is introduced."""
+    names = {str(program) for program in POLYTHENE_CATALOGUE.allowlist}
+
+    assert names == {"podman", "tar", "bwrap", "proot", "chroot"}
+
+
+def test_program_rejects_a_name_outside_the_catalogue() -> None:
+    """A name the catalogue does not curate fails before any spawn."""
+    from cuprum import UnknownProgramError
+
+    with pytest.raises(UnknownProgramError, match="not in the catalogue"):
+        program("definitely-not-a-curated-tool")
+
+
+def test_command_record_is_immutable() -> None:
+    """The result types are values, so a test double cannot mutate one."""
+    outcome = command_result(run_cmd(_payload("")))
+
+    with pytest.raises(dc.FrozenInstanceError):
+        typ.cast("typ.Any", outcome).exit_code = 1

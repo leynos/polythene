@@ -72,7 +72,7 @@ def _run_with_fake_gh(
         if calls.exists()
         else []
     )
-    return completed.returncode, completed.stderr, recorded
+    return completed.exit_code, completed.stderr or "", recorded
 
 
 def test_an_existing_release_is_reused(tmp_path: pth.Path) -> None:
@@ -180,7 +180,7 @@ def test_the_snapshot_carries_the_release_bytes_for_this_runs_names(
         fake.env(GITHUB_REF_NAME=_TAG),
     )
 
-    assert completed.returncode == 0, completed.stderr
+    assert completed.exit_code == 0, completed.stderr
     state = tmp_path / "github-state"
     carried = {path.name: path.read_bytes() for path in (state / "files").iterdir()}
     assert carried == {"p-1.tar.gz": b"published"}, (
