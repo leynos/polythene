@@ -35,7 +35,25 @@ GUARDED = (
 @pytest.mark.parametrize(
     ("makefile", "wired"),
     [
-        pytest.param(GOOD, True, id="wired"),
+        pytest.param(GOOD, True, id="wired with pipefail"),
+        pytest.param(
+            GOOD.replace("set -o pipefail && ", ""), False, id="unguarded pipeline"
+        ),
+        pytest.param(
+            GOOD.replace("set -o pipefail && ", "set -o pipefail\n\t"),
+            False,
+            id="pipefail in separate shell",
+        ),
+        pytest.param(
+            GUARDED.replace('<"$$tmp"\n', '<"$$tmp" || exit 0\n'),
+            False,
+            id="guarded lint exit zero",
+        ),
+        pytest.param(
+            GUARDED.replace("$(ACTIONLINT)\n", "$(ACTIONLINT) || exit 0\n"),
+            False,
+            id="actionlint exit zero",
+        ),
         pytest.param(GUARDED, True, id="guarded"),
         pytest.param(
             GUARDED.replace("\tgit ls-files", "\t-git ls-files") + GUARDED,
@@ -84,12 +102,12 @@ GUARDED = (
             id="yamllint failure ignored",
         ),
         pytest.param(
-            GOOD.replace("\tgit ls-files", "\t-git ls-files"),
+            GOOD.replace("\tset -o pipefail", "\t-set -o pipefail"),
             False,
             id="yamllint prefixed with a dash",
         ),
         pytest.param(
-            GOOD.replace("\tgit ls-files", "\t! git ls-files"),
+            GOOD.replace("\tset -o pipefail", "\t! set -o pipefail"),
             False,
             id="yamllint negated",
         ),
@@ -151,6 +169,11 @@ def test_the_gate_judgement_detects_each_defect(makefile: str, *, wired: bool) -
         ),
         pytest.param(
             gate(f"- uses: {PINNED}", "- run: make lint || true"), False, id="ignored"
+        ),
+        pytest.param(
+            gate(f"- uses: {PINNED}", "- run: make lint || exit 0"),
+            False,
+            id="ignored by exit zero",
         ),
         pytest.param(
             gate(f"- uses: {PINNED}", "- run: make lint || :"),
