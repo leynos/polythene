@@ -157,12 +157,13 @@ def is_bypassed(line: str) -> bool:
     Returns
     -------
     bool
-        ``True`` for a leading ``-`` or ``!``, ``|| true``, ``|| :``, or a
-        command followed by ``;``.
+        ``True`` for a leading ``-`` or ``!``, a success fallback such as
+        ``|| true``, ``|| :``, or ``|| exit 0``, or a command followed by ``;``.
 
     """
     return bool(
-        line.startswith(("-", "!", "@-")) or re.search(r"\|\|\s*(?:true\b|:)|;", line)
+        line.startswith(("-", "!", "@-"))
+        or re.search(r"\|\|\s*(?:true\b|:|exit\s+0\b)|;", line)
     )
 
 
@@ -178,12 +179,12 @@ def is_sound_yamllint(line: str) -> bool:
     -------
     bool
         ``True`` when the line pipes ``git ls-files`` over both extensions into
-        a strict ``$(YAMLLINT)`` and its failure is not bypassed.
+        a strict ``$(YAMLLINT)`` with pipefail in the same shell and no bypass.
 
     """
     return all(
         [
-            line.startswith("git ls-files"),
+            line.startswith("set -o pipefail && git ls-files"),
             "'*.yml'" in line,
             "'*.yaml'" in line,
             "| xargs" in line,
