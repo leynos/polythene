@@ -60,10 +60,12 @@ class _StubTool:
     """
 
     def __init__(self, binary: str) -> None:
+        """Create a stub tool for the named binary with no recorded calls."""
         self.binary = binary
         self.calls: list[tuple[ArgValue, ...]] = []
 
     def __call__(self, *args: ArgValue, **kwargs: ArgValue) -> SafeCmd:
+        """Record the arguments and return a command for the binary."""
         if kwargs:
             msg = f"backend passed flags as keywords: {sorted(kwargs)}"
             raise AssertionError(msg)
@@ -109,6 +111,7 @@ def test_prepare_proot_avoids_login_shell(
         timeout: int | None,
         **_: object,
     ) -> object:
+        """Stand in for run_cmd in the test."""
         run_calls.append(cmd.argv)
         return _outcome(cmd, 0)
 
@@ -152,6 +155,7 @@ def test_make_prepare_bwrap_binds_context(
         timeout: int | None,
         **_: object,
     ) -> object:
+        """Stand in for run_cmd in the test."""
         assert fg is True
         probe_calls.append((cmd.argv, timeout))
         return _outcome(cmd, 0)
@@ -182,6 +186,7 @@ def test_make_prepare_bwrap_gives_up_when_the_probe_fails(
     monkeypatch.setattr(backends, "_probe_bwrap_proc", lambda *_a, **_k: [])
 
     def fake_run_cmd(cmd: SafeCmd, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         return _outcome(cmd, 1, "", "bwrap: setting up uid map: Permission denied")
 
     monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
@@ -200,10 +205,12 @@ def test_proot_backend_run_uses_non_login_shell(
     executed: list[tuple[str, ...]] = []
 
     def fake_get_command(binary: str) -> SafeCmdBuilder:
+        """Stand in for get_command in the test."""
         assert binary == backend.binary
         return typ.cast("SafeCmdBuilder", stub)
 
     def fake_run_cmd(cmd: SafeCmd, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         executed.append(cmd.argv)
         return _outcome(cmd, 0)
 
@@ -236,6 +243,7 @@ def test_backend_run_reports_the_child_status(
     )
 
     def fake_run_cmd(cmd: SafeCmd, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         status = 0 if cmd.argv[:1] == ("-R",) and "true" in cmd.argv else 7
         return _outcome(cmd, status)
 
@@ -256,6 +264,7 @@ def test_probe_bwrap_userns_uses_context_timeout(
     timeouts: list[int | None] = []
 
     def fake_run_cmd(cmd: SafeCmd, *, timeout: int | None, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         assert cmd.argv[-1] == "true"
         timeouts.append(timeout)
         return _outcome(cmd, 0)
@@ -279,6 +288,7 @@ def test_probe_bwrap_userns_permission_denied(
     """Permission denied on stderr should disable bubblewrap early."""
 
     def fake_run_cmd(cmd: SafeCmd, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         return _outcome(cmd, 1, "", "bwrap: Permission denied")
 
     monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
@@ -303,6 +313,7 @@ def test_probe_bwrap_userns_captures_stderr(
     foreground: list[bool] = []
 
     def fake_run_cmd(cmd: SafeCmd, *, fg: bool = False, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         foreground.append(fg)
         return _outcome(cmd, 1, "", "bwrap: Permission denied")
 
@@ -324,6 +335,7 @@ def test_probe_bwrap_userns_oserror_eperm(
     """OS errors reporting ``EPERM`` disable bubblewrap immediately."""
 
     def fake_run_cmd(_cmd: SafeCmd, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         raise OSError(errno.EPERM, "Operation not permitted")
 
     monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
@@ -341,6 +353,7 @@ def test_probe_bwrap_userns_missing_binary_is_not_fatal(
     """A binary cuprum cannot resolve is reported, not raised at the caller."""
 
     def fake_run_cmd(_cmd: SafeCmd, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         raise FileNotFoundError(2, "No such file or directory", "bwrap")
 
     monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
@@ -366,6 +379,7 @@ def test_probe_bwrap_userns_respects_sysctl(
 
     def fail_run_cmd(*_args: object, **_kwargs: object) -> typ.NoReturn:
         # ty misreads pytest.fail's decorated signature; the call is correct.
+        """Fail the test if run_cmd is called."""
         pytest.fail(
             "bubblewrap should not be probed when sysctl=0"  # ty: ignore[invalid-argument-type]
         )
@@ -391,6 +405,7 @@ def test_probe_bwrap_userns_sysctl_missing(
     executed: list[tuple[str, ...]] = []
 
     def fake_run_cmd(cmd: SafeCmd, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         executed.append(cmd.argv)
         return _outcome(cmd, 0)
 
@@ -417,6 +432,7 @@ def test_probe_bwrap_userns_sysctl_read_error(
     logs: list[str] = []
 
     def fake_run_cmd(cmd: SafeCmd, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         return _outcome(cmd, 0)
 
     monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
@@ -447,6 +463,7 @@ def test_probe_bwrap_userns_skips_sysctl_for_privileged(
     stub = _StubTool("bwrap")
 
     def fake_run_cmd(cmd: SafeCmd, **_: object) -> object:
+        """Stand in for run_cmd in the test."""
         return _outcome(cmd, 0)
 
     monkeypatch.setattr(backends, "run_cmd", fake_run_cmd)
@@ -470,6 +487,7 @@ def test_backend_run_logs_bubblewrap_unavailability(
         _root: object,
         _inner_cmd: object,
     ) -> list[str] | None:
+        """Stand in for the backend preparation function in the test."""
         message = "bubblewrap unavailable"
         raise backends.BubblewrapUnavailable(message)
 

@@ -121,7 +121,8 @@ To contribute changes, format the code, run the tests, and type-check the
 project via the Makefile targets. Helpful commands include:
 
 - `make fmt` – Format Python and Markdown sources.
-- `make lint` – Run Ruff static analysis.
+- `make lint` – Require complete docstrings (interrogate) and run Ruff static
+  analysis.
 - `make test` – Execute the pytest suite.
 - `make typecheck` – Run static type checks with `ty`.
 

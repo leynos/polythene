@@ -57,10 +57,12 @@ class _RecordingTool:
     """
 
     def __init__(self, binary: str) -> None:
+        """Create a recording tool for the named binary with no calls."""
         self.binary = binary
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, *args: str) -> SafeCmd:
+        """Record the arguments and return a command for the binary."""
         self.calls.append(args)
         return sh.make(
             Program(self.binary),
@@ -105,6 +107,7 @@ def stub_export(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch ``export_rootfs`` to create the destination without error."""
 
     def _fake(image: str, dest: Path, *, timeout: int | None = None) -> None:
+        """Create the destination directory without exporting anything."""
         dest.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(isolation, "export_rootfs", _fake)
@@ -139,10 +142,12 @@ def stub_proot(monkeypatch: pytest.MonkeyPatch, cli_context: Context) -> None:
     executions: list[tuple[str, ...]] = []
 
     def fake_get_command(binary: str) -> SafeCmdBuilder:
+        """Stand in for get_command in the test."""
         assert binary == proot_backend.binary
         return typ.cast("SafeCmdBuilder", stub)
 
     def fake_run_cmd(cmd: SafeCmd, **_: object) -> CommandOutcome:
+        """Stand in for run_cmd in the test."""
         executions.append(cmd.argv)
         return result(cmd, 0)
 

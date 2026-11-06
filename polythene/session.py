@@ -22,6 +22,7 @@ class SandboxRunner(typ.Protocol):
         *,
         timeout: int | None = None,
     ) -> int:  # pragma: no cover - protocol definition
+        """Run the command line and return its exit status."""
         ...
 
 
@@ -116,6 +117,7 @@ class PolytheneSession:
         command: typ.Sequence[str] | str,
         isolation: IsolationName | None,
     ) -> list[str]:
+        """Return the polythene exec command line for the session."""
         tokens = (
             shlex.split(command, comments=False, posix=True)
             if isinstance(command, str)
@@ -146,6 +148,7 @@ class PolytheneSession:
         return argv
 
     def _default_isolation(self) -> IsolationName | None:
+        """Return the named isolation, proot under GitHub Actions, or None."""
         if explicit := self._env.get("POLYTHENE_ISOLATION"):
             match explicit:
                 case "bubblewrap":

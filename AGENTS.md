@@ -101,7 +101,10 @@ When implementing changes, adhere to the following testing procedures:
   - For Python files:
     - **Testing:** Passes all relevant unit and behavioural tests according to
       the guidelines above (run `make test` to verify).
-    - **Linting:** Passes lint checks (`make lint`).
+    - **Linting:** Passes lint checks (`make lint`), which require a docstring
+      on every module, class and function interrogate scans under `polythene`,
+      `scripts` and `tests`, apart from the paths it skips by default
+      (interrogate 1.7.0, `--fail-under 100`, run through `uv`).
     - **Formatting:** Adheres to formatting standards (run `make check-fmt` to
       verify, use `make fmt` to apply formatting).
     - **Typechecking:** Passes type checking (`make typecheck`).

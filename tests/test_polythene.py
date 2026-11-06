@@ -27,6 +27,7 @@ def test_cmd_pull_exports_rootfs(
     monkeypatch.setattr(isolation, "generate_uuid", lambda: "uuid-1234")
 
     def _fake_export(image: str, dest: Path, *, timeout: int | None = None) -> None:
+        """Record the export request and create the destination directory."""
         calls.append((image, dest, timeout))
         dest.mkdir(parents=True, exist_ok=True)
 
@@ -69,6 +70,7 @@ def test_cmd_pull_retries_existing_uuid(
     call_count = 0
 
     def _fake_export(image: str, dest: Path, *, timeout: int | None = None) -> None:
+        """Fail the first export with FileExistsError, then create the destination."""
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -450,6 +452,7 @@ def test_module_main_delegates_to_package_main(
     called = False
 
     def _stub() -> None:
+        """Record that the stub was called."""
         nonlocal called
         called = True
 
@@ -466,6 +469,7 @@ def test_main_accepts_custom_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     received: list[str] = []
 
     def _capture(tokens: typ.Sequence[str]) -> None:
+        """Record the tokens passed to the application."""
         received[:] = list(tokens)
 
     monkeypatch.setattr(isolation, "app", _capture)
