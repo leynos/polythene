@@ -89,9 +89,11 @@ check-fmt: ruff ## Verify formatting
 	ruff format --check $(PYTHON_TARGETS)
 	$(MDTABLEFIX) --check $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
 
-# Interrogate measures docstring presence over every Python file the repository
-# owns. Add a new Python directory to INTERROGATE_TARGETS. No `--python` pin: a
-# managed interpreter would be downloaded, and a PyO3 build could link it.
+# Interrogate measures docstring presence over the Python files it scans under
+# INTERROGATE_TARGETS (it skips some path prefixes by default, so check a new
+# file against the verbose report). Add a new Python directory to the targets.
+# No `--python` pin: a managed interpreter would be downloaded, and a PyO3
+# build could link it.
 INTERROGATE_VERSION ?= 1.7.0
 INTERROGATE_TARGETS ?= polythene scripts tests
 # Level 2 prints a MISSED row per undocumented definition, which the

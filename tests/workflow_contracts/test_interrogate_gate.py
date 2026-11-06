@@ -1,12 +1,14 @@
 """Contract tests for the Python docstring-coverage gate in the Makefile.
 
-`make lint` must reach an `interrogate` run that covers every Python file the
-repository owns, at a threshold of 100, with a guard that fails on any `MISSED`
-row (interrogate rounds its percentage to one decimal, so the threshold alone
-passes a lone gap in a large repository), and CI must have uv before it runs
-`make lint`. These tests read the recipe and the workflow, and also run the
-target against a stub tool, so a deleted flag, a dropped prerequisite or a
-guard that stops failing breaks a test rather than silently restoring the gap.
+`make lint` must reach an `interrogate` run over every Python directory the
+repository owns (interrogate itself skips some path prefixes, so a new file
+should appear in the verbose report), at a threshold of 100, with a guard that
+fails on any `MISSED` row (interrogate rounds its percentage to one decimal, so
+the threshold alone passes a lone gap in a large repository), and CI must have
+uv before it runs `make lint`. These tests read the recipe and the workflow, and
+also run the target against a stub tool, so a deleted flag, a dropped
+prerequisite or a guard that stops failing breaks a test rather than silently
+restoring the gap.
 
 Run via ``make test-workflow-contracts``.
 """
