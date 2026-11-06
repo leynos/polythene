@@ -132,7 +132,7 @@ def ensure_runtime_paths(root: Path) -> None:
 
 
 def _probe_bwrap_userns(bwrap: SafeCmdBuilder, context: BackendContext) -> list[str]:
-    """Return the user-namespace flags, or raise if bubblewrap cannot run."""
+    """Return the user-namespace flags, [] if the probe fails, or raise if refused."""
     logger = context.logger
     timeout = context.timeout
     if not _is_privileged_user():
@@ -216,7 +216,7 @@ def make_prepare_bwrap(context: BackendContext) -> PrepareFn:
         root: Path,
         inner_cmd: str,
     ) -> list[str] | None:
-        """Probe bubblewrap and return its arguments, or None if unusable."""
+        """Probe bubblewrap: return its arguments, None if unusable, or raise."""
         base_flags = _probe_bwrap_userns(bwrap, context)
         base_flags.extend(["--unshare-pid", "--unshare-ipc", "--unshare-uts"])
         proc_flags = _probe_bwrap_proc(

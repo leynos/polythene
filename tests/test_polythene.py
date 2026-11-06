@@ -70,7 +70,7 @@ def test_cmd_pull_retries_existing_uuid(
     call_count = 0
 
     def _fake_export(image: str, dest: Path, *, timeout: int | None = None) -> None:
-        """Record the export request and create the destination directory."""
+        """Fail the first export with FileExistsError, then create the destination."""
         nonlocal call_count
         call_count += 1
         if call_count == 1:

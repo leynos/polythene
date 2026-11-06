@@ -317,7 +317,7 @@ def cmd_exec(
         selected_backends = (preferred, *remaining)
 
     def _next_available_backend(start: int) -> Backend | None:
-        """Return the first usable backend at or after the given index, or None."""
+        """Return the first backend from the index whose root need is met, or None."""
         for candidate in selected_backends[start:]:
             if candidate.requires_root and not IS_ROOT:
                 continue

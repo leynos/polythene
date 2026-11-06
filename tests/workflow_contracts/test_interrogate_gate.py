@@ -52,14 +52,16 @@ def _tracked(*patterns: str) -> list[str]:
     """Return the Git-tracked files matching *patterns*.
 
     Git is the authority on what the repository owns: a walk would also see
-    the virtual environments CI creates beside the sources.
+    the virtual environments CI creates beside the sources. Names are read from
+    NUL-separated output, so a path containing whitespace stays whole.
     """
-    return subprocess.run(  # noqa: S603, TID251 - fixed argv, no shell; git ls-files
-        ["git", "-C", str(ROOT), "ls-files", *patterns],  # noqa: S607 - git from PATH
+    output = subprocess.run(  # noqa: S603, TID251 - fixed argv, no shell; git ls-files
+        ["git", "-C", str(ROOT), "ls-files", "-z", *patterns],  # noqa: S607 - git
         capture_output=True,
         text=True,
         check=True,
-    ).stdout.split()
+    ).stdout
+    return [name for name in output.split("\0") if name]
 
 
 def _python_directories() -> set[Path]:
@@ -120,7 +122,7 @@ def test_every_python_directory_is_a_target() -> None:
 
 
 def test_ci_installs_uv_before_it_runs_make_lint() -> None:
-    """Every job that runs `make lint` needs uv set up first, and one must run it."""
+    """Each job with an exact `make lint` step sets up uv first; one such job exists."""
     workflow = yaml.safe_load(CI.read_text(encoding="utf-8"))
     checked = 0
     for name, job in workflow["jobs"].items():
@@ -177,7 +179,7 @@ def test_the_target_passes_the_configured_flags_and_targets(tmp_path: Path) -> N
 
 
 def test_the_target_fails_when_the_tool_fails(tmp_path: Path) -> None:
-    """The tool's own non-zero status is kept."""
+    """A failing tool fails the target."""
     result = _run_target(tmp_path, "echo 'FAILED'\nexit 1\n")
     assert result.returncode != 0
 
@@ -190,7 +192,7 @@ def test_the_target_fails_when_the_tool_fails(tmp_path: Path) -> None:
 def test_the_target_fails_on_a_missed_row_the_percentage_hid(
     tmp_path: Path, cell: str
 ) -> None:
-    """Rounded to 100.0% with exit 0, a MISSED row still fails the target.
+    """A MISSED row in a report from a successful run still fails the target.
 
     The guard must not depend on how many spaces pad the status cell.
     """

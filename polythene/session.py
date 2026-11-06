@@ -148,7 +148,7 @@ class PolytheneSession:
         return argv
 
     def _default_isolation(self) -> IsolationName | None:
-        """Return the isolation named by the environment, if any."""
+        """Return the named isolation, proot under GitHub Actions, or None."""
         if explicit := self._env.get("POLYTHENE_ISOLATION"):
             match explicit:
                 case "bubblewrap":
