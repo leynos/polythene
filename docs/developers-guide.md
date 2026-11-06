@@ -611,6 +611,17 @@ make markdownlint
 make nixie
 ```
 
+`make lint` depends on `make interrogate`, which requires a docstring on every
+module, class and function in the Python files under `polythene`, `scripts` and
+`tests`. The target runs interrogate 1.7.0 through `uv tool run` with
+`-vv --fail-under 100`, so it needs `uv` on the path, and it also fails on any
+`MISSED` row because the rounded percentage can hide a single gap. Add a new
+Python directory to `INTERROGATE_TARGETS` in the Makefile.
+`tests/workflow_contracts/test_interrogate_gate.py` holds the wiring: it checks
+that `lint` reaches the target, the pin and the flags, that every directory
+holding Python is a target, and that a failing or `MISSED` report fails the
+target.
+
 `fmt` writes and `check-fmt` only reports, so running `fmt` before `check-fmt`
 is what keeps the second command quiet. `check-fmt` also runs `mdtablefix` with
 `--git --include-untracked`, selecting the Markdown files Git tracks plus the

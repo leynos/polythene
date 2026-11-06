@@ -16,6 +16,7 @@ class _RecordingSandbox:
     """Sandbox stub capturing invocations for assertions."""
 
     def __init__(self) -> None:
+        """Create a sandbox with no recorded calls."""
         self.calls: list[tuple[list[str], int | None]] = []
 
     def run(
@@ -24,6 +25,7 @@ class _RecordingSandbox:
         *,
         timeout: int | None = None,
     ) -> int:
+        """Record the command line and timeout, and report success."""
         self.calls.append((list(argv), timeout))
         return 0
 

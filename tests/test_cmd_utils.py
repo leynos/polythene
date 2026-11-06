@@ -202,6 +202,7 @@ class _Recording:
             _cmd: SafeCmd,
             **kwargs: object,
         ) -> CommandResult:
+            """Record the keyword arguments and return a canned result."""
             calls.append(kwargs)
             return CommandResult(
                 program=PYTHON,

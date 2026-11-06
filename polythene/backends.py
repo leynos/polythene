@@ -132,6 +132,7 @@ def ensure_runtime_paths(root: Path) -> None:
 
 
 def _probe_bwrap_userns(bwrap: SafeCmdBuilder, context: BackendContext) -> list[str]:
+    """Return the user-namespace flags, or raise if bubblewrap cannot run."""
     logger = context.logger
     timeout = context.timeout
     if not _is_privileged_user():
@@ -186,6 +187,7 @@ def _probe_bwrap_proc(
     *,
     timeout: int | None,
 ) -> list[str]:
+    """Return the flags that mount /proc, or an empty list if the probe fails."""
     probe = [
         *base_flags,
         "--bind",
@@ -205,6 +207,7 @@ def _probe_bwrap_proc(
 
 
 def make_prepare_bwrap(context: BackendContext) -> PrepareFn:
+    """Build the bubblewrap preparation function for a backend context."""
     timeout = context.timeout
     container_tmp = context.container_tmp
 
@@ -213,6 +216,7 @@ def make_prepare_bwrap(context: BackendContext) -> PrepareFn:
         root: Path,
         inner_cmd: str,
     ) -> list[str] | None:
+        """Probe bubblewrap and return its arguments, or None if unusable."""
         base_flags = _probe_bwrap_userns(bwrap, context)
         base_flags.extend(["--unshare-pid", "--unshare-ipc", "--unshare-uts"])
         proc_flags = _probe_bwrap_proc(
@@ -267,6 +271,7 @@ def make_prepare_bwrap(context: BackendContext) -> PrepareFn:
 
 
 def make_prepare_proot(context: BackendContext) -> PrepareFn:
+    """Build the proot preparation function for a backend context."""
     timeout = context.timeout
 
     def _prepare_proot(
@@ -274,6 +279,7 @@ def make_prepare_proot(context: BackendContext) -> PrepareFn:
         root: Path,
         inner_cmd: str,
     ) -> list[str] | None:
+        """Probe proot and return its command arguments, or None if it is unusable."""
         probe_args = ["-R", str(root), "-0", "/bin/sh", "-c", "true"]
         try:
             outcome = run_cmd(proot(*probe_args), fg=True, timeout=timeout)
@@ -287,6 +293,7 @@ def make_prepare_proot(context: BackendContext) -> PrepareFn:
 
 
 def make_prepare_chroot(context: BackendContext) -> PrepareFn:
+    """Build the chroot preparation function for a backend context."""
     timeout = context.timeout
 
     def _prepare_chroot(
@@ -294,6 +301,7 @@ def make_prepare_chroot(context: BackendContext) -> PrepareFn:
         root: Path,
         inner_cmd: str,
     ) -> list[str] | None:
+        """Probe chroot and return its command arguments, or None if it is unusable."""
         probe_args = [str(root), "/bin/sh", "-c", "true"]
         try:
             outcome = run_cmd(chroot(*probe_args), fg=True, timeout=timeout)

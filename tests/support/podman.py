@@ -225,6 +225,7 @@ def install_recording_tools(monkeypatch: pytest.MonkeyPatch) -> RecordingTools:
     )
 
     def recording_get_command(name: str) -> SafeCmdBuilder:
+        """Record the requested tool name and return its command builder."""
         tools.requested.append(name)
         return program(name, catalogue=POLYTHENE_CATALOGUE)
 

@@ -11,6 +11,8 @@ if typ.TYPE_CHECKING:
 
 
 class _DummyBackend:
+    """Backend stub that reports a configured exit code."""
+
     def __init__(
         self,
         exit_code: int | None,
