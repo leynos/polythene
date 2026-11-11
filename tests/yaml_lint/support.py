@@ -166,6 +166,38 @@ def is_bypassed(line: str) -> bool:
     )
 
 
+def _actionlint_is_wired(lines: list[str]) -> bool:
+    """Say whether actionlint runs without a failure bypass."""
+    return any(
+        line.startswith("$(ACTIONLINT)") and not is_bypassed(line) for line in lines
+    )
+
+
+def _pipefail_yamllint_is_wired(lines: list[str]) -> bool:
+    """Say whether a non-bypassed same-shell pipefail pipeline runs strict yamllint."""
+    pipeline = "git ls-files -z '*.yml' '*.yaml' | xargs -0 -r $(YAMLLINT) --strict --"
+    return any(
+        line.removeprefix("@").startswith("set -o pipefail && ")
+        and pipeline in line
+        and not is_bypassed(line)
+        for line in lines
+    )
+
+
+def _guarded_yamllint_is_wired(lines: list[str]) -> bool:
+    """Check strict lint uses Git's tracked-YAML temp file without bypasses."""
+    guarded_commands = (
+        "git ls-files -z '*.yml' '*.yaml' >\"$$tmp\" &&",
+        'xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"',
+    )
+    matching_lines = [
+        line for line in lines if any(command in line for command in guarded_commands)
+    ]
+    return all(
+        any(command in line for line in matching_lines) for command in guarded_commands
+    ) and all(not is_bypassed(line) for line in matching_lines)
+
+
 def gate_is_wired(makefile: str) -> bool:
     """Say whether the lint closure runs strict yamllint over Git's list and actionlint.
 
@@ -184,27 +216,9 @@ def gate_is_wired(makefile: str) -> bool:
 
     """
     lines = lint_closure(makefile)
-    actionlint = any(
-        line.startswith("$(ACTIONLINT)") and not is_bypassed(line) for line in lines
+    return _actionlint_is_wired(lines) and (
+        _guarded_yamllint_is_wired(lines) or _pipefail_yamllint_is_wired(lines)
     )
-    guarded_commands = (
-        "git ls-files -z '*.yml' '*.yaml' >\"$$tmp\" &&",
-        'xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"',
-    )
-    matching_lines = [
-        line for line in lines if any(c in line for c in guarded_commands)
-    ]
-    guarded_yamllint = all(
-        any(command in line for line in matching_lines) for command in guarded_commands
-    ) and all(not is_bypassed(line) for line in matching_lines)
-    pipeline = "git ls-files -z '*.yml' '*.yaml' | xargs -0 -r $(YAMLLINT) --strict --"
-    pipefail_yamllint = any(
-        line.removeprefix("@").startswith("set -o pipefail && ")
-        and pipeline in line
-        and not is_bypassed(line)
-        for line in lines
-    )
-    return actionlint and (guarded_yamllint or pipefail_yamllint)
 
 
 def is_job_header(line: str) -> bool:

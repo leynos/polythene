@@ -7,7 +7,6 @@ import inspect
 import os
 import re
 import sys
-import time
 import typing as typ
 
 import pytest
@@ -307,18 +306,42 @@ def test_command_result_rejects_a_pipeline_result() -> None:
         command_result(outcome)
 
 
-#: Seconds the producer in the live-producer test spends writing. Cuprum's
-#: pure-Python pump gives an upstream stage only ``_POST_CLOSE_DRAIN_TIMEOUT_S``
-#: (0.25 s in cuprum 0.2.0b2) to reach EOF once the downstream stage closes,
-#: and then stops relaying without killing the producer. A producer that
-#: outlives that window is left blocked on a pipe, so the pipeline never
-#: settles. This budget stays inside the window while still outlasting the
-#: consumer's interpreter startup, which is what puts the two in flight
-#: together.
+#: Seconds the producer spends writing after the consumer has read its
+#: readiness marker. Cuprum's pure-Python pump gives an upstream stage only
+#: ``_POST_CLOSE_DRAIN_TIMEOUT_S`` (0.25 s in cuprum 0.2.0b2) to reach EOF once
+#: the downstream stage closes, so this stays inside that window.
 _PRODUCER_BUDGET_S = 0.20
 
 
-def test_pipeline_names_the_consumer_that_died_under_a_live_producer() -> None:
+def _live_producer_pipeline(consumer_ready: Path) -> tuple[SafeCmd, SafeCmd]:
+    """Build a pipeline whose producer waits for the consumer's readiness."""
+    ready_path = str(consumer_ready)
+    producer = _payload(
+        "import pathlib, sys, time\n"
+        f"consumer_ready = pathlib.Path({ready_path!r})\n"
+        "sys.stdout.write('producer-ready\\n')\n"
+        "sys.stdout.flush()\n"
+        "while not consumer_ready.exists():\n"
+        "    time.sleep(0.001)\n"
+        f"end = time.monotonic() + {_PRODUCER_BUDGET_S}\n"
+        "while time.monotonic() < end:\n"
+        "    sys.stdout.write('garbage' * 4000)\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.002)\n",
+    )
+    consumer = _payload(
+        "import pathlib, sys\n"
+        "if sys.stdin.readline() != 'producer-ready\\n':\n"
+        "    sys.exit(4)\n"
+        f"pathlib.Path({ready_path!r}).touch()\n"
+        "sys.exit(3)\n",
+    )
+    return producer, consumer
+
+
+def test_pipeline_names_the_consumer_that_died_under_a_live_producer(
+    tmp_path: Path,
+) -> None:
     """The failing stage is the consumer, even when the producer outlives it.
 
     This is the shape ``export_rootfs`` has: a producer still writing when the
@@ -328,24 +351,11 @@ def test_pipeline_names_the_consumer_that_died_under_a_live_producer() -> None:
     reports the same thing, so a drift in that attribution fails here rather
     than silently making the export report the wrong command.
 
-    The producer stops on a wall-clock budget rather than a loop count. A count
-    tuned for this machine would drift past cuprum's drain window on a slower
-    one, turning the test into a hang instead of a failure; the budget below
-    bounds the workload itself. The consumer's own startup is measured
-    separately in ``test_live_producer_test_overlaps_its_consumer``.
+    The consumer signals readiness only after reading the producer's first
+    output. The producer starts its bounded write window after that signal, so
+    cold interpreter startup does not control whether the stages overlap.
     """
-    # The producer writes until its budget runs out, which is well after the
-    # consumer has rejected its input, so the consumer is the stage that fails
-    # while input is still arriving.
-    producer = _payload(
-        "import sys, time\n"
-        f"end = time.monotonic() + {_PRODUCER_BUDGET_S}\n"
-        "while time.monotonic() < end:\n"
-        "    sys.stdout.write('garbage' * 4000)\n"
-        "    sys.stdout.flush()\n"
-        "    time.sleep(0.002)\n",
-    )
-    consumer = _payload("import sys; sys.exit(3)")
+    producer, consumer = _live_producer_pipeline(tmp_path / "consumer-ready")
 
     outcome = run_cmd(producer | consumer, timeout=30)
 
@@ -356,30 +366,9 @@ def test_pipeline_names_the_consumer_that_died_under_a_live_producer() -> None:
     assert failure_detail(outcome) == "stage 1 (exit status 3)"
 
 
-def test_live_producer_test_overlaps_its_consumer() -> None:
-    """The producer budget must outlast the consumer's startup.
-
-    The test above only proves what it claims while both stages are in flight:
-    a producer that finished before the consumer even started would leave the
-    consumer reading end-of-file, which is a different shape. Measuring the
-    consumer's startup here keeps that assumption honest, and fails loudly if a
-    slower interpreter or a heavier startup path erodes the margin.
-    """
-    started = time.monotonic()
-    outcome = command_result(run_cmd(_payload("import sys; sys.exit(3)"), timeout=30))
-    startup = time.monotonic() - started
-
-    assert outcome.exit_code == 3
-    assert startup < _PRODUCER_BUDGET_S, (
-        f"consumer startup {startup:.3f}s no longer fits inside the "
-        f"{_PRODUCER_BUDGET_S}s producer budget, so the two stages may not "
-        "overlap; raise the budget within cuprum's drain window or shorten "
-        "the consumer"
-    )
-
-
 def test_pipeline_settles_on_the_pure_python_stream_backend(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """The pipeline must build the same answer whatever stream backend runs it.
 
@@ -404,15 +393,7 @@ def test_pipeline_settles_on_the_pure_python_stream_backend(
         _backend, "get_stream_backend", lambda: _backend.StreamBackend.PYTHON
     )
 
-    producer = _payload(
-        "import sys, time\n"
-        f"end = time.monotonic() + {_PRODUCER_BUDGET_S}\n"
-        "while time.monotonic() < end:\n"
-        "    sys.stdout.write('garbage' * 4000)\n"
-        "    sys.stdout.flush()\n"
-        "    time.sleep(0.002)\n",
-    )
-    consumer = _payload("import sys; sys.exit(3)")
+    producer, consumer = _live_producer_pipeline(tmp_path / "consumer-ready")
 
     outcome = run_cmd(producer | consumer, timeout=30)
 

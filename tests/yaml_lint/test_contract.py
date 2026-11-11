@@ -24,9 +24,13 @@ from .support import (
     HAND_ROLLED,
     INSTALLER,
     REPO_ROOT,
+    _actionlint_is_wired,
+    _guarded_yamllint_is_wired,
+    _pipefail_yamllint_is_wired,
     ci_installs_before_lint,
     gate_is_wired,
     jobs,
+    lint_closure,
 )
 
 
@@ -150,6 +154,63 @@ from .support import (
 def test_the_gate_judgement_detects_each_defect(makefile: str, *, wired: bool) -> None:
     """Each defect fails the judgement, and the compliant shapes pass it."""
     assert gate_is_wired(makefile) is wired, makefile
+
+
+def test_actionlint_judgement_rejects_a_bypassed_command() -> None:
+    """Actionlint is required and its failure cannot be ignored."""
+    good_lines = lint_closure(GOOD)
+    bypassed_lines = lint_closure(
+        GOOD.replace("\t$(ACTIONLINT)", "\t$(ACTIONLINT) || exit 0")
+    )
+
+    assert _actionlint_is_wired(good_lines)
+    assert not _actionlint_is_wired(bypassed_lines)
+
+
+@pytest.mark.parametrize(
+    ("makefile", "wired"),
+    [
+        pytest.param(GOOD, True, id="guarded temporary file"),
+        pytest.param(
+            GOOD.replace("\tgit ls-files", "\t-git ls-files"),
+            False,
+            id="git enumeration bypassed",
+        ),
+        pytest.param(
+            GOOD.replace('--strict -- <"$$tmp"', '--strict -- <"$$tmp" || :'),
+            False,
+            id="yamllint failure bypassed",
+        ),
+    ],
+)
+def test_guarded_yamllint_judgement_detects_each_defect(
+    makefile: str, *, wired: bool
+) -> None:
+    """The temporary-file shape is guarded and cannot mask either failure."""
+    assert _guarded_yamllint_is_wired(lint_closure(makefile)) is wired
+
+
+@pytest.mark.parametrize(
+    ("makefile", "wired"),
+    [
+        pytest.param(PIPEFAIL_PIPELINE, True, id="same shell"),
+        pytest.param(
+            PIPEFAIL_PIPELINE.replace("set -o pipefail && ", ""),
+            False,
+            id="no pipefail",
+        ),
+        pytest.param(
+            PIPEFAIL_PIPELINE.replace("set -o pipefail && ", "set -o pipefail\n\t"),
+            False,
+            id="different shell",
+        ),
+    ],
+)
+def test_pipefail_yamllint_judgement_requires_the_same_shell(
+    makefile: str, *, wired: bool
+) -> None:
+    """A direct pipeline is accepted only with same-shell pipefail."""
+    assert _pipefail_yamllint_is_wired(lint_closure(makefile)) is wired
 
 
 @pytest.mark.parametrize(
