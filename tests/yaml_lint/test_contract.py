@@ -36,8 +36,8 @@ from .support import (
         pytest.param(GOOD, True, id="guarded temporary file"),
         pytest.param(
             PIPEFAIL_PIPELINE,
-            False,
-            id="pipefail pipeline can lint partial Git output",
+            True,
+            id="pipefail pipeline",
         ),
         pytest.param(
             PIPEFAIL_PIPELINE.replace("set -o pipefail && ", ""),

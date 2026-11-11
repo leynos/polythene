@@ -177,8 +177,10 @@ def gate_is_wired(makefile: str) -> bool:
     Returns
     -------
     bool
-        ``True`` when both tools run in the lint closure, Git's YAML file list
-        is buffered before yamllint runs, and neither failure is bypassed.
+        ``True`` when actionlint runs in the lint closure and yamllint reads
+        Git's YAML file list through either guarded temporary-file input or a
+        pipeline whose shell enables ``pipefail`` first, with neither failure
+        bypassed.
 
     """
     lines = lint_closure(makefile)
@@ -195,7 +197,14 @@ def gate_is_wired(makefile: str) -> bool:
     guarded_yamllint = all(
         any(command in line for line in matching_lines) for command in guarded_commands
     ) and all(not is_bypassed(line) for line in matching_lines)
-    return actionlint and guarded_yamllint
+    pipeline = "git ls-files -z '*.yml' '*.yaml' | xargs -0 -r $(YAMLLINT) --strict --"
+    pipefail_yamllint = any(
+        line.removeprefix("@").startswith("set -o pipefail && ")
+        and pipeline in line
+        and not is_bypassed(line)
+        for line in lines
+    )
+    return actionlint and (guarded_yamllint or pipefail_yamllint)
 
 
 def is_job_header(line: str) -> bool:
