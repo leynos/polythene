@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .support import INSTALLER, PIPE
+from .support import INSTALLER
 
 
 def code_lines(text: str) -> list[str]:
@@ -23,7 +23,19 @@ def code_lines(text: str) -> list[str]:
     return [line for line in lines if line and not line.startswith("#")]
 
 
+PIPE = "git ls-files -z '*.yml' '*.yaml' | xargs -0 -r"
+
 GOOD = (
+    "lint: yamllint actionlint\n"
+    "yamllint:\n"
+    "\t@tmp=$$(mktemp) || exit 1; \\\n"
+    "\ttrap 'rm -f \"$$tmp\"' EXIT; \\\n"
+    "\tgit ls-files -z '*.yml' '*.yaml' >\"$$tmp\" && \\\n"
+    '\txargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"\n'
+    "actionlint:\n"
+    "\t$(ACTIONLINT)\n"
+)
+PIPEFAIL_PIPELINE = (
     "lint: yamllint actionlint\n"
     "yamllint:\n"
     f"\tset -o pipefail && {PIPE} $(YAMLLINT) --strict --\n"

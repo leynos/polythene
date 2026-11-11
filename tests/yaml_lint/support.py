@@ -27,7 +27,6 @@ HAND_ROLLED = re.compile(
     r"uv tool install[^\n]*yamllint|download-actionlint"
     r"|releases/download[^\n]*actionlint"
 )
-PIPE = "git ls-files -z '*.yml' '*.yaml' | xargs -0 -r"
 GATE_COMMAND = re.compile(r"^(- )?run: (/usr/bin/)?make( \S+)* lint( \S+)*$")
 
 
@@ -167,35 +166,6 @@ def is_bypassed(line: str) -> bool:
     )
 
 
-def is_sound_yamllint(line: str) -> bool:
-    """Say whether a recipe line lints the tracked YAML strictly from Git's list.
-
-    Parameters
-    ----------
-    line : str
-        One recipe line.
-
-    Returns
-    -------
-    bool
-        ``True`` when the line pipes ``git ls-files`` over both extensions into
-        a strict ``$(YAMLLINT)`` with pipefail in the same shell and no bypass.
-
-    """
-    return all(
-        [
-            line.startswith("set -o pipefail && git ls-files"),
-            "'*.yml'" in line,
-            "'*.yaml'" in line,
-            "| xargs" in line,
-            "$(YAMLLINT)" in line,
-            "--strict" in line,
-            ".github" not in line,
-            not is_bypassed(line),
-        ]
-    )
-
-
 def gate_is_wired(makefile: str) -> bool:
     """Say whether the lint closure runs strict yamllint over Git's list and actionlint.
 
@@ -207,8 +177,8 @@ def gate_is_wired(makefile: str) -> bool:
     Returns
     -------
     bool
-        ``True`` when both tools run in the lint closure and neither failure
-        is bypassed.
+        ``True`` when both tools run in the lint closure, Git's YAML file list
+        is buffered before yamllint runs, and neither failure is bypassed.
 
     """
     lines = lint_closure(makefile)
@@ -225,9 +195,7 @@ def gate_is_wired(makefile: str) -> bool:
     guarded_yamllint = all(
         any(command in line for line in matching_lines) for command in guarded_commands
     ) and all(not is_bypassed(line) for line in matching_lines)
-    return actionlint and (
-        guarded_yamllint or any(is_sound_yamllint(line) for line in lines)
-    )
+    return actionlint and guarded_yamllint
 
 
 def is_job_header(line: str) -> bool:

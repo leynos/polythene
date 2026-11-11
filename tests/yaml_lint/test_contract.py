@@ -11,58 +11,62 @@ from __future__ import annotations
 
 import pytest
 
-from .fixtures import CANONICAL_ESTATE_BASE, GOOD, PINNED, code_lines, gate
+from .fixtures import (
+    CANONICAL_ESTATE_BASE,
+    GOOD,
+    PINNED,
+    PIPEFAIL_PIPELINE,
+    code_lines,
+    gate,
+)
 from .support import (
     GATE_COMMAND,
     HAND_ROLLED,
     INSTALLER,
-    PIPE,
     REPO_ROOT,
     ci_installs_before_lint,
     gate_is_wired,
     jobs,
 )
 
-GUARDED = (
-    "lint: yamllint actionlint\n"
-    "yamllint:\n"
-    "\tgit ls-files -z '*.yml' '*.yaml' >\"$$tmp\" && \\\n"
-    '\txargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"\n'
-    "actionlint:\n\t$(ACTIONLINT)\n"
-)
-
 
 @pytest.mark.parametrize(
     ("makefile", "wired"),
     [
-        pytest.param(GOOD, True, id="wired with pipefail"),
+        pytest.param(GOOD, True, id="guarded temporary file"),
         pytest.param(
-            GOOD.replace("set -o pipefail && ", ""), False, id="unguarded pipeline"
+            PIPEFAIL_PIPELINE,
+            False,
+            id="pipefail pipeline can lint partial Git output",
         ),
         pytest.param(
-            GOOD.replace("set -o pipefail && ", "set -o pipefail\n\t"),
+            PIPEFAIL_PIPELINE.replace("set -o pipefail && ", ""),
+            False,
+            id="unguarded pipeline",
+        ),
+        pytest.param(
+            PIPEFAIL_PIPELINE.replace("set -o pipefail && ", "set -o pipefail\n\t"),
             False,
             id="pipefail in separate shell",
         ),
         pytest.param(
-            GUARDED.replace('<"$$tmp"\n', '<"$$tmp" || exit 0\n'),
+            GOOD.replace('<"$$tmp"\n', '<"$$tmp" || exit 0\n'),
             False,
             id="guarded lint exit zero",
         ),
         pytest.param(
-            GUARDED.replace("$(ACTIONLINT)\n", "$(ACTIONLINT) || exit 0\n"),
+            GOOD.replace("$(ACTIONLINT)\n", "$(ACTIONLINT) || exit 0\n"),
             False,
             id="actionlint exit zero",
         ),
-        pytest.param(GUARDED, True, id="guarded"),
         pytest.param(
-            GUARDED.replace("\tgit ls-files", "\t-git ls-files") + GUARDED,
+            GOOD.replace("\tgit ls-files", "\t-git ls-files") + GOOD,
             False,
             id="guarded bypass alongside sound command",
         ),
         *[
             pytest.param(
-                GUARDED.replace(f"\t{command}", f"\t{prefix}{command}"),
+                GOOD.replace(f"\t{command}", f"\t{prefix}{command}"),
                 False,
                 id=f"guarded {command} prefixed {prefix}",
             )
@@ -70,19 +74,22 @@ GUARDED = (
             for prefix in ("-", "@-", "! ")
         ],
         pytest.param(
-            GOOD.replace("--strict --\n", "--strict -- || :\n"),
+            GOOD.replace('--strict -- <"$$tmp"', '--strict -- <"$$tmp" || :'),
             False,
             id="yamllint failure ignored by colon",
         ),
         pytest.param(GOOD.replace(" --strict", ""), False, id="not strict"),
         pytest.param(GOOD.replace(" '*.yaml'", ""), False, id="one pathspec"),
         pytest.param(
-            GOOD.replace(f"{PIPE} $(YAMLLINT) --strict --", "$(YAMLLINT) --strict ."),
+            GOOD.replace(
+                'xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"',
+                "$(YAMLLINT) --strict .",
+            ),
             False,
             id="whole tree",
         ),
         pytest.param(
-            GOOD.replace("'*.yaml' |", "'*.yaml' .github/workflows |"),
+            GOOD.replace("'*.yaml' >", "'*.yaml' .github/workflows >"),
             False,
             id="workflows only",
         ),
@@ -97,17 +104,17 @@ GUARDED = (
             GOOD.replace("\t$(ACTIONLINT)", "\ttrue"), False, id="no actionlint"
         ),
         pytest.param(
-            GOOD.replace("--strict --\n", "--strict -- || true\n"),
+            GOOD.replace('--strict -- <"$$tmp"', '--strict -- <"$$tmp" || true'),
             False,
             id="yamllint failure ignored",
         ),
         pytest.param(
-            GOOD.replace("\tset -o pipefail", "\t-set -o pipefail"),
+            GOOD.replace("\tgit ls-files", "\t-git ls-files"),
             False,
             id="yamllint prefixed with a dash",
         ),
         pytest.param(
-            GOOD.replace("\tset -o pipefail", "\t! set -o pipefail"),
+            GOOD.replace("\tgit ls-files", "\t! git ls-files"),
             False,
             id="yamllint negated",
         ),
