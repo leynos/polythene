@@ -156,13 +156,21 @@ def is_bypassed(line: str) -> bool:
     Returns
     -------
     bool
-        ``True`` for a leading ``-`` or ``!``, a success fallback such as
-        ``|| true``, ``|| :``, or ``|| exit 0``, or a command followed by ``;``.
+        ``True`` for a leading ``-`` or ``!``, a ``||`` fallback that may
+        succeed (except an explicit failure-preserving fallback such as
+        ``false`` or ``exit 1``), or a command followed by ``;``.
 
     """
+    fallback_index = line.find("||")
+    fallback = line[fallback_index + 2 :].strip() if fallback_index >= 0 else ""
+    exit_status = re.fullmatch(r"exit\s+(\d+)", fallback)
+    failure_preserving_fallback = fallback == "false" or bool(
+        exit_status and 1 <= int(exit_status[1]) <= 255
+    )
     return bool(
         line.startswith(("-", "!", "@-"))
-        or re.search(r"\|\|\s*(?:true\b|:|exit\s+0\b)|;", line)
+        or (fallback_index >= 0 and not failure_preserving_fallback)
+        or ";" in line
     )
 
 
@@ -341,11 +349,12 @@ def step_ignores_failure(line: str) -> bool:
     Returns
     -------
     bool
-        ``True`` for ``continue-on-error: true`` or a bypassed ``run`` command.
+        ``True`` when ``continue-on-error`` has any value other than literal
+        ``false``, or when a ``run`` command bypasses its failure.
 
     """
     if line.startswith("continue-on-error"):
-        return "true" in line
+        return line.partition(":")[2].strip() != "false"
     if line.startswith(("- run:", "run:")):
         return is_bypassed(line.removeprefix("- run: ").removeprefix("run: "))
     return False

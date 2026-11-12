@@ -59,9 +59,31 @@ from .support import (
             id="guarded lint exit zero",
         ),
         pytest.param(
+            GOOD.replace(
+                '--strict -- <"$$tmp"', '--strict -- <"$$tmp" || echo ignored'
+            ),
+            False,
+            id="guarded lint successful fallback",
+        ),
+        pytest.param(
+            GOOD.replace('--strict -- <"$$tmp"', '--strict -- <"$$tmp" || exit 1'),
+            True,
+            id="guarded lint failure-preserving fallback",
+        ),
+        pytest.param(
+            PIPEFAIL_PIPELINE.replace("--strict --", "--strict -- || echo ignored"),
+            False,
+            id="pipefail lint successful fallback",
+        ),
+        pytest.param(
             GOOD.replace("$(ACTIONLINT)\n", "$(ACTIONLINT) || exit 0\n"),
             False,
             id="actionlint exit zero",
+        ),
+        pytest.param(
+            GOOD.replace("$(ACTIONLINT)\n", "$(ACTIONLINT) || echo ignored\n"),
+            False,
+            id="actionlint successful fallback",
         ),
         pytest.param(
             GOOD.replace("\tgit ls-files", "\t-git ls-files") + GOOD,
@@ -244,6 +266,16 @@ def test_pipefail_yamllint_judgement_requires_the_same_shell(
             id="ignored by exit zero",
         ),
         pytest.param(
+            gate(f"- uses: {PINNED}", "- run: make lint || echo ignored"),
+            False,
+            id="ignored by successful fallback",
+        ),
+        pytest.param(
+            gate(f"- uses: {PINNED}", "- run: make lint || exit 1"),
+            True,
+            id="failure-preserving fallback",
+        ),
+        pytest.param(
             gate(f"- uses: {PINNED}", "- run: make lint || :"),
             False,
             id="ignored by colon",
@@ -256,6 +288,24 @@ def test_pipefail_yamllint_judgement_requires_the_same_shell(
             ),
             False,
             id="continue on error",
+        ),
+        pytest.param(
+            gate(
+                f"- uses: {PINNED}",
+                "- run: make lint",
+                "  continue-on-error: ${{ 1 == 1 }}",
+            ),
+            False,
+            id="continue on error expression",
+        ),
+        pytest.param(
+            gate(
+                f"- uses: {PINNED}",
+                "- run: make lint",
+                "  continue-on-error: false",
+            ),
+            True,
+            id="continue on error false",
         ),
         pytest.param(
             gate(
