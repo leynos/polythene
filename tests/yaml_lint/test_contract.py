@@ -301,11 +301,29 @@ def test_pipefail_yamllint_judgement_requires_the_same_shell(
         pytest.param(
             gate(
                 f"- uses: {PINNED}",
+                "- continue-on-error: ${{ 1 == 1 }}",
+                "  run: make lint",
+            ),
+            False,
+            id="continue on error expression first",
+        ),
+        pytest.param(
+            gate(
+                f"- uses: {PINNED}",
                 "- run: make lint",
                 "  continue-on-error: false",
             ),
             True,
             id="continue on error false",
+        ),
+        pytest.param(
+            gate(
+                f"- uses: {PINNED}",
+                "- continue-on-error: false",
+                "  run: make lint",
+            ),
+            True,
+            id="continue on error false first",
         ),
         pytest.param(
             gate(

@@ -353,10 +353,11 @@ def step_ignores_failure(line: str) -> bool:
         ``false``, or when a ``run`` command bypasses its failure.
 
     """
-    if line.startswith("continue-on-error"):
-        return line.partition(":")[2].strip() != "false"
-    if line.startswith(("- run:", "run:")):
-        return is_bypassed(line.removeprefix("- run: ").removeprefix("run: "))
+    step_line = line.removeprefix("- ")
+    if step_line.startswith("continue-on-error"):
+        return step_line.partition(":")[2].strip() != "false"
+    if step_line.startswith("run:"):
+        return is_bypassed(step_line.removeprefix("run: "))
     return False
 
 
