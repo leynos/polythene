@@ -560,7 +560,7 @@ What the library cannot prove is that this repository calls it, so
 to `check --repository .` under Python 3.13, `.github/cv005.toml` to this
 repository's name, `make all` to the target, and CI to an unconditional step
 that runs it. The decision to take the library rather than keep a local copy is
-recorded in [ADR 001](adr-001-adopt-the-shared-cv005-contract-library.md).
+recorded in [ADR 001](adrs/adr-0001-adopt-the-shared-cv005-contract-library.md).
 
 Both layers check configuration, not outcomes. The contracts prove the pin, the
 wiring, and the workflow shape; they do not run the CodeScene upload, so a
@@ -772,7 +772,7 @@ under. `.github/cv005.toml` holds the repository's parameters, and its
 `interpreter = "3.13"` makes the library require every generate-coverage call
 to pin `UV_PYTHON` to that version, inside the project's `requires-python`
 (`>=3.12`), so both lanes measure on one Python. The decision is recorded in
-[ADR 001](adr-001-adopt-the-shared-cv005-contract-library.md).
+[ADR 001](adrs/adr-0001-adopt-the-shared-cv005-contract-library.md).
 `tests/workflow_contracts/test_cv005_wiring.py` fails if the pin is not a full
 commit, the target stops running the pinned checker, the repository parameter
 is wrong, `make all` drops the target or CI stops running it.
@@ -798,7 +798,7 @@ Releases are published by `.github/workflows/release.yml`, triggered by a tag
 matching `v*.*.*`. The process is modelled on cuprum's
 ([ADR 017](https://github.com/leynos/cuprum/blob/main/docs/adr-017-release-pipeline.md));
 polythene's own record is
-[ADR 002](adr-002-attested-reconciled-release-pipeline.md).
+[ADR 002](adrs/adr-0002-attested-reconciled-release-pipeline.md).
 
 The distribution name on PyPI is `polythene-isolate`. The import package stays
 `polythene`, and so does the console script, so `uv run polythene` and
@@ -900,4 +900,4 @@ polythene does not carry cuprum's `release-telemetry` action. The pipeline has
 no metric consumer, and GitHub's run history and the attestation store already
 record what each run did. `tests/test_release_workflow_contract.py` fails if
 the action is reintroduced; the rationale is in
-[ADR 002](adr-002-attested-reconciled-release-pipeline.md#no-telemetry-action).
+[ADR 002](adrs/adr-0002-attested-reconciled-release-pipeline.md#no-telemetry-action).

@@ -161,7 +161,7 @@ upload to the GitHub Release; that stays entirely in `draft-release` and
 names owner `leynos`, repository `polythene`, workflow `release.yml`, and
 environment `pypi`, so an upload from any other workflow or environment is
 refused. Both settings are prerequisites of the first tag and are recorded in
-the [developer guide](developers-guide.md#publishing-a-release).
+the [developer guide](../developers-guide.md#publishing-a-release).
 
 ### The Simple index lookup
 
@@ -230,7 +230,7 @@ reintroduced.
 with the manifest. All three modules use only the Python standard library — no
 Cyclopts, and no cuprum — and the entry points run under the runner's
 preinstalled `python3` rather than through `uv run`. This is a deliberate,
-documented exception to [scripting standards](scripting-standards.md):
+documented exception to [scripting standards](../scripting-standards.md):
 `publish-pypi` holds the PyPI OpenID Connect (OIDC) credential and must not
 resolve any third-party package while that credential is live. Every network
 call these scripts might otherwise make stays in the workflow's own `curl` and
