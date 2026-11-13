@@ -67,7 +67,7 @@ sequenceDiagram
 - **Process execution:** A curated cuprum catalogue names every executable the
   package may start, and one helper runs them. The decision and its
   consequences are recorded in
-  [ADR 003](adr-003-adopt-cuprum-for-process-execution.md).
+  [ADR 003](adrs/adr-0003-adopt-cuprum-for-process-execution.md).
 - **Script utilities:** Provide filesystem and command helpers that are safe to
   consume both from installed packages and from ad-hoc scripts shipped in the
   repository.
@@ -99,5 +99,6 @@ Publication is reconciled per filename with a fixed precedence — PyPI, then th
 GitHub Release, then the run's own bytes — so a repeated tag converges rather
 than overwriting anything already published. The pipeline, the name, and the
 reconciliation rule are recorded in
-[ADR 002](adr-002-attested-reconciled-release-pipeline.md); the operational
-steps are in the [developer guide](developers-guide.md#publishing-a-release).
+[ADR 002](adrs/adr-0002-attested-reconciled-release-pipeline.md); the
+operational steps are in the
+[developer guide](developers-guide.md#publishing-a-release).
