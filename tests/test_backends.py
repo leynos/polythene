@@ -378,12 +378,9 @@ def test_probe_bwrap_userns_respects_sysctl(
     monkeypatch.setattr(backends, "_is_privileged_user", lambda: False)
 
     def fail_run_cmd(*_args: object, **_kwargs: object) -> typ.NoReturn:
-        # ty misreads pytest.fail's decorated signature; the call is correct.
         """Fail the test if run_cmd is called."""
-        pytest.fail(
-            "bubblewrap should not be probed when sysctl=0"  # ty: ignore[invalid-argument-type]
-        )
-        raise AssertionError("unreachable")  # appease Pyright's flow analysis
+        message = "bubblewrap should not be probed when sysctl=0"
+        raise AssertionError(message)
 
     monkeypatch.setattr(backends, "run_cmd", fail_run_cmd)
 
